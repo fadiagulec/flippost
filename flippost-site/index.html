@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlipPost - Viral Script Generator</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <a href="#" class="logo">FlipPost</a>
+            <p class="tagline">See It. Flip It. Post It. Go Viral.</p>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- Tabs Navigation -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="url-tab">📥 URL Extract</button>
+            <button class="tab-btn" data-tab="script-tab">✍️ Script Rewrite</button>
+            <button class="tab-btn" data-tab="ideas-tab">💡 Niche Ideas</button>
+        </div>
+
+        <!-- Tab 1: URL Extract & Twist -->
+        <div id="url-tab" class="tab-content active">
+            <div class="input-section">
+                <div class="input-group">
+                    <label for="urlInput">Paste a social media URL</label>
+                    <input
+                        type="url"
+                        id="urlInput"
+                        placeholder="https://www.instagram.com/reel/... or TikTok, YouTube, LinkedIn, etc."
+                    />
+                </div>
+
+                <div id="platformBadge"></div>
+                <div id="errorMessage"></div>
+
+                <div id="actionButtons" class="button-group">
+                    <button id="downloadBtn" class="btn-tertiary">⬇️ Download Media</button>
+                    <button id="extractBtn" class="btn-primary">⚡ Extract & Flip Script</button>
+                </div>
+            </div>
+
+            <div id="resultsContainer"></div>
+        </div>
+
+        <!-- Tab 2: Script Rewrite -->
+        <div id="script-tab" class="tab-content">
+            <div class="input-section">
+                <div class="input-group">
+                    <label for="scriptInput">Paste your script or caption</label>
+                    <textarea
+                        id="scriptInput"
+                        placeholder="Paste any script, caption, or text here and FlipPost will rewrite it with a viral angle and proven hook..."
+                        rows="6"
+                    ></textarea>
+                </div>
+
+                <div id="scriptErrorMessage"></div>
+
+                <div class="button-group">
+                    <button id="rewriteBtn" class="btn-primary">✨ Flip This Script</button>
+                </div>
+            </div>
+
+            <div id="scriptResultsContainer"></div>
+        </div>
+
+        <!-- Tab 3: Niche Ideas -->
+        <div id="ideas-tab" class="tab-content">
+            <div class="input-section">
+                <div class="input-group">
+                    <label for="nicheInput">Your Niche</label>
+                    <input
+                        type="text"
+                        id="nicheInput"
+                        placeholder="e.g. personal finance, fitness, real estate, cooking..."
+                    />
+                </div>
+
+                <div class="input-group">
+                    <label for="nicheDescription">What do you want to post about?</label>
+                    <textarea
+                        id="nicheDescription"
+                        placeholder="Describe the topic or result you want to create content about..."
+                        rows="4"
+                    ></textarea>
+                </div>
+
+                <div id="ideasErrorMessage"></div>
+
+                <div class="button-group">
+                    <button id="generateIdeasBtn" class="btn-secondary">🚀 Generate 3 Viral Ideas</button>
+                </div>
+            </div>
+
+            <div id="ideasResultsContainer"></div>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 <a href="../flippost-landing-page.html">FlipPost</a> — All rights reserved.</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>

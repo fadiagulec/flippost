@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlipPost — See It. Flip It. Post It. Go Viral.</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background-color: #0a0a0a;
+            color: #e0e0e0;
+            line-height: 1.6;
+        }
+
+        /* ── NAV ── */
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 18px 40px;
+            background: rgba(10,10,10,0.95);
+            border-bottom: 1px solid #222;
+            position: sticky;
+            top: 0;
+            z-index: 999;
+        }
+
+        .nav-logo { font-size: 22px; font-weight: 700; color: #ff6b00; text-decoration: none; }
+
+        .nav-cta {
+            padding: 10px 22px;
+            background: linear-gradient(135deg, #ff6b00, #ff9500);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            transition: all 0.25s;
+        }
+        .nav-cta:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(255,107,0,0.35); }
+
+        /* ── CONTAINER ── */
+        .container { max-width: 1100px; margin: 0 auto; padding: 0 22px; }
+
+        /* ── HERO ── */
+        .hero {
+            padding: 90px 0 70px;
+            text-align: center;
+            background: linear-gradient(160deg, rgba(255,107,0,0.08), rgba(120,58,237,0.08));
+            border-bottom: 1px solid #222;
+        }
+
+        .badge {
+            display: inline-block;
+            background: rgba(255,107,0,0.18);
+            color: #ff9500;
+            padding: 7px 16px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 22px;
+        }
+
+        .hero h1 {
+            font-size: 54px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #ff6b00, #ff9500);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 20px;
+            line-height: 1.15;
+        }
+
+        .hero-sub {
+            font-size: 19px;
+            color: #aaa;
+            max-width: 680px;
+            margin: 0 auto 40px;
+        }
+
+        .hero-stats {
+            display: flex;
+            justify-content: center;
+            gap: 50px;
+            margin: 40px 0;
+            flex-wrap: wrap;
+        }
+
+        .stat { text-align: center; }
+        .stat-num { font-size: 36px; font-weight: 700; color: #ff6b00; }
+        .stat-label { color: #888; font-size: 13px; }
+
+        .cta-group {
+            display: flex;
+            gap: 16px;
+            justify-content: center;
+            margin-top: 40px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 16px 38px;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.25s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .btn-orange {
+            background: linear-gradient(135deg, #ff6b00, #ff9500);
+            color: #fff;
+        }
+        .btn-orange:hover { transform: translateY(-3px); box-shadow: 0 14px 35px rgba(255,107,0,0.4); }
+
+        .btn-outline {
+            background: transparent;
+            color: #ff6b00;
+            border: 2px solid #ff6b00;
+        }
+        .btn-outline:hover { background: #ff6b00; color: #fff; }
+
+        /* ── SECTIONS ── */
+        section { padding: 80px 0; }
+        section.dark { background: #141414; border-top: 1px solid #222; border-bottom: 1px solid #222; }
+
+        .section-title {
+            text-align: center;
+            font-size: 34px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 50px;
+        }
+
+        /* ── BENEFITS GRID ── */
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 26px;
+        }
+
+        .card {
+            background: #0a0a0a;
+            padding: 28px;
+            border-radius: 12px;
+            border: 1px solid #222;
+            transition: all 0.3s;
+        }
+        .card:hover { border-color: #ff6b00; box-shadow: 0 10px 30px rgba(255,107,0,0.1); transform: translateY(-4px); }
+
+        .card-icon { font-size: 38px; margin-bottom: 14px; }
+        .card h3 { color: #ff6b00; margin-bottom: 10px; font-size: 17px; }
+        .card p { color: #999; font-size: 14px; }
+
+        /* ── STEPS ── */
+        .steps-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 26px;
+            margin-top: 50px;
+        }
+
+        .step {
+            text-align: center;
+            background: #141414;
+            padding: 30px 24px;
+            border-radius: 12px;
+            border: 1px solid #222;
+        }
+
+        .step-num { font-size: 46px; font-weight: 800; color: #ff6b00; margin-bottom: 12px; }
+        .step h3 { color: #fff; margin-bottom: 8px; font-size: 17px; }
+        .step p { color: #999; font-size: 14px; }
+
+        /* ── PLATFORMS ── */
+        .platforms-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 18px;
+            margin-top: 40px;
+        }
+
+        .platform {
+            background: #0a0a0a;
+            padding: 18px 14px;
+            border-radius: 10px;
+            text-align: center;
+            border: 1px solid #222;
+            font-size: 14px;
+            transition: all 0.25s;
+        }
+        .platform:hover { border-color: #ff6b00; color: #ff6b00; }
+        .platform-icon { font-size: 30px; margin-bottom: 8px; }
+
+        /* ── PRICING ── */
+        .pricing-card {
+            max-width: 480px;
+            margin: 0 auto;
+            background: linear-gradient(160deg, rgba(255,107,0,0.1), rgba(120,58,237,0.1));
+            padding: 50px 40px;
+            border-radius: 14px;
+            border: 2px solid #ff6b00;
+            text-align: center;
+        }
+
+        .pricing-card h3 { font-size: 22px; margin-bottom: 14px; }
+        .price { font-size: 58px; font-weight: 800; color: #ff6b00; margin: 10px 0; }
+        .price-note { color: #888; font-size: 13px; margin-bottom: 26px; }
+
+        .features-list { text-align: left; margin: 26px 0; padding: 20px 0; border-top: 1px solid #2a2a2a; border-bottom: 1px solid #2a2a2a; }
+        .feature { color: #ccc; margin: 11px 0; font-size: 14px; }
+        .feature::before { content: "✓ "; color: #4ade80; font-weight: 700; }
+
+        /* ── AFFILIATE ── */
+        .affiliate-section {
+            text-align: center;
+            padding: 70px 0;
+            background: #141414;
+            border-top: 1px solid #222;
+        }
+
+        .affiliate-section h2 { font-size: 30px; font-weight: 700; margin-bottom: 14px; }
+        .affiliate-section p { color: #aaa; font-size: 16px; margin-bottom: 28px; max-width: 600px; margin-left: auto; margin-right: auto; }
+
+        .btn-purple {
+            background: linear-gradient(135deg, #7c3aed, #a855f7);
+            color: #fff;
+            padding: 14px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.25s;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .btn-purple:hover { transform: translateY(-2px); box-shadow: 0 10px 25px rgba(120,58,237,0.35); }
+
+        /* ── FOOTER ── */
+        footer {
+            background: #000;
+            border-top: 1px solid #1a1a1a;
+            padding: 36px 0;
+            text-align: center;
+            color: #555;
+            font-size: 13px;
+        }
+        footer a { color: #ff6b00; text-decoration: none; }
+        footer a:hover { color: #ff9500; }
+
+        /* ── RESPONSIVE ── */
+        @media (max-width: 768px) {
+            nav { padding: 14px 18px; }
+            .hero { padding: 60px 0 50px; }
+            .hero h1 { font-size: 36px; }
+            .hero-sub { font-size: 16px; }
+            .hero-stats { gap: 28px; }
+            .stat-num { font-size: 28px; }
+            .section-title { font-size: 26px; }
+            .pricing-card { padding: 32px 22px; }
+            .price { font-size: 44px; }
+            .cta-group { flex-direction: column; align-items: center; }
+            .btn { width: 100%; max-width: 340px; text-align: center; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+    <a href="#" class="nav-logo">FlipPost</a>
+    <a href="https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d" class="nav-cta">Get Access — $47</a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+    <div class="container">
+        <div class="badge">🚀 AI-Powered Viral Script Generator</div>
+        <h1>See It. Flip It.<br>Post It. Go Viral.</h1>
+        <p class="hero-sub">
+            Paste any social media URL and FlipPost extracts the script, rewrites it with a fresh angle,
+            and gives you a proven hook — ready to post on any platform.
+        </p>
+
+        <div class="hero-stats">
+            <div class="stat">
+                <div class="stat-num">7</div>
+                <div class="stat-label">Platforms Supported</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num">3x</div>
+                <div class="stat-label">Faster Content Creation</div>
+            </div>
+            <div class="stat">
+                <div class="stat-num">∞</div>
+                <div class="stat-label">Script Rewrites</div>
+            </div>
+        </div>
+
+        <div class="cta-group">
+            <a href="https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d" class="btn btn-orange">Get Instant Access — $47</a>
+            <a href="flippost-site/index.html" class="btn btn-outline">Try the App Free</a>
+        </div>
+    </div>
+</section>
+
+<!-- BENEFITS -->
+<section class="dark">
+    <div class="container">
+        <h2 class="section-title">Why Creators Choose FlipPost</h2>
+        <div class="grid-3">
+            <div class="card">
+                <div class="card-icon">⚡</div>
+                <h3>Instant Script Extraction</h3>
+                <p>Paste a URL from any supported platform and get the full script or caption pulled automatically — no manual watching or typing.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">✨</div>
+                <h3>AI-Powered Flip</h3>
+                <p>Claude AI rewrites every script with a unique angle so you're inspired by viral content — not copying it.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">🎯</div>
+                <h3>Proven Hooks Included</h3>
+                <p>Every rewrite comes with a scroll-stopping hook. No guesswork, no blank page — just plug in and post.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">📸</div>
+                <h3>Videos, Images & Carousels</h3>
+                <p>Works on every content type. Video transcripts, image captions, and carousel text are all handled automatically.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">💡</div>
+                <h3>Niche Idea Generator</h3>
+                <p>Stuck? Enter your niche and get 3 ready-to-record viral script ideas in seconds.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">💰</div>
+                <h3>One-Time Price</h3>
+                <p>No monthly fees. Pay $47 once and get lifetime access including all future updates.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section>
+    <div class="container">
+        <h2 class="section-title">How It Works</h2>
+        <div class="steps-grid">
+            <div class="step">
+                <div class="step-num">1</div>
+                <h3>Paste a URL</h3>
+                <p>Copy any viral post link from Instagram, TikTok, YouTube, LinkedIn, Facebook, X, or Threads.</p>
+            </div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <h3>Extract Script</h3>
+                <p>FlipPost auto-extracts the transcript or caption — for videos, images, and carousels.</p>
+            </div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <h3>Get Your Flip</h3>
+                <p>AI rewrites it with a new angle and generates a proven hook to stop the scroll.</p>
+            </div>
+            <div class="step">
+                <div class="step-num">4</div>
+                <h3>Copy & Post</h3>
+                <p>One-click copy and go live. Your content, your voice, viral-ready.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- PLATFORMS -->
+<section class="dark">
+    <div class="container">
+        <h2 class="section-title">Works With 7 Platforms</h2>
+        <div class="platforms-grid">
+            <div class="platform"><div class="platform-icon">📷</div>Instagram</div>
+            <div class="platform"><div class="platform-icon">🎵</div>TikTok</div>
+            <div class="platform"><div class="platform-icon">▶️</div>YouTube</div>
+            <div class="platform"><div class="platform-icon">💼</div>LinkedIn</div>
+            <div class="platform"><div class="platform-icon">👥</div>Facebook</div>
+            <div class="platform"><div class="platform-icon">𝕏</div>X / Twitter</div>
+            <div class="platform"><div class="platform-icon">🧵</div>Threads</div>
+        </div>
+    </div>
+</section>
+
+<!-- PRICING -->
+<section id="pricing">
+    <div class="container">
+        <h2 class="section-title">Simple, One-Time Pricing</h2>
+        <div class="pricing-card">
+            <h3>FlipPost Pro</h3>
+            <div class="price">$47</div>
+            <p class="price-note">One-time payment · Lifetime access · No subscriptions</p>
+
+            <div class="features-list">
+                <div class="feature">Unlimited script extractions</div>
+                <div class="feature">Unlimited AI rewrites & hooks</div>
+                <div class="feature">All 7 platforms supported</div>
+                <div class="feature">Video, image & carousel support</div>
+                <div class="feature">Niche viral idea generator</div>
+                <div class="feature">Lifetime updates included</div>
+            </div>
+
+            <a href="https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d" class="btn btn-orange" style="width:100%;text-align:center;display:block;">
+                Get Instant Access — $47
+            </a>
+        </div>
+    </div>
+</section>
+
+<!-- AFFILIATE -->
+<div class="affiliate-section">
+    <div class="container">
+        <h2>Earn 70% Commission</h2>
+        <p>
+            Join the FlipPost affiliate program and earn <strong style="color:#ff6b00;">$32.90 per sale</strong>.
+            Share your unique link, we handle delivery and support.
+        </p>
+        <a href="mailto:fadiagulec@gmail.com?subject=FlipPost%20Affiliate%20Program" class="btn-purple">
+            Apply to Become an Affiliate
+        </a>
+    </div>
+</div>
+
+<!-- FOOTER -->
+<footer>
+    <div class="container">
+        <p>&copy; 2026 FlipPost · All rights reserved · <a href="mailto:fadiagulec@gmail.com">Contact</a></p>
+    </div>
+</footer>
+
+</body>
+</html>
