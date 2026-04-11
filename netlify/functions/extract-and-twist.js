@@ -49,42 +49,33 @@ async function fetchInstagramCaption(url) {
     const embedUrl = `https://www.instagram.com/p/${sc}/embed/`;
     const html = await get(embedUrl);
 
-    // Strategy 1: double-escaped JSON blob — Instagram embeds use \"text\":\"...\"
-    // The backslashes are literal characters in the HTML source.
-    const m1escaped = html.match(/\\"text\\":\\"((?:[^\\"]|\\[^"]){10,})\\"/);
-    if (m1escaped) {
+    // Strategy 1: The embed page wraps caption data in a double-escaped JSON blob.
+    // Raw HTML looks like:  \"text\":\"caption text here\\nmore text\"
+    // We grab everything between the opening \":\" and the closing \" and let
+    // JSON.parse handle all escape sequences (\\n, \\uXXXX, surrogate pairs, etc.)
+    // by wrapping the captured fragment in a JSON string literal.
+    const m1 = html.match(/\\"text\\":\\"([\s\S]{10,?}?)\\"\s*[,}]/);
+    if (m1) {
         try {
-            // The captured group still has \\n, \\uXXXX etc. Decode them.
-            const raw = m1escaped[1]
-                .replace(/\\n/g, '\n')
-                .replace(/\\t/g, '\t')
-                .replace(/\\u([\dA-Fa-f]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-                .replace(/\\"/g, '"')
-                .replace(/\\\\/g, '\\');
-            if (raw.length >= 10) return raw;
+            // m1[1] still has one layer of JSON escaping (\\n, \\uD83D, etc.)
+            // JSON.parse("\"...\") handles it correctly including surrogate pairs.
+            const decoded = JSON.parse('"' + m1[1].replace(/"/g, '\\"') + '"');
+            if (decoded && decoded.length >= 10) return decoded;
         } catch (e) {}
     }
 
-    // Strategy 1b: un-escaped form (returned when IG serves non-SPA embed)
+    // Strategy 1b: un-escaped form (returned when IG serves a non-SPA embed page)
     const m1plain = html.match(/"text":"([^"]{10,})"/);
     if (m1plain) {
-        try {
-            return m1plain[1].replace(/\\n/g, '\n').replace(/\\u([\dA-Fa-f]{4})/g, (_, hex) =>
-                String.fromCharCode(parseInt(hex, 16))
-            );
-        } catch (e) {}
+        try { return JSON.parse('"' + m1plain[1] + '"'); } catch (e) { return m1plain[1]; }
     }
 
     // Strategy 2: edge_media_to_caption — escaped form
-    const m2esc = html.match(/edge_media_to_caption\\":\{\\"edges\\":\[\{\\"node\\":\{\\"text\\":\\"((?:[^\\"]|\\[^"]){10,})\\"/);
+    const m2esc = html.match(/edge_media_to_caption\\":\{\\"edges\\":\[\{\\"node\\":\{\\"text\\":\\"([\s\S]{10,?}?)\\"\s*[,}]/);
     if (m2esc) {
         try {
-            const raw = m2esc[1]
-                .replace(/\\n/g, '\n')
-                .replace(/\\u([\dA-Fa-f]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
-                .replace(/\\"/g, '"')
-                .replace(/\\\\/g, '\\');
-            if (raw.length >= 10) return raw;
+            const decoded = JSON.parse('"' + m2esc[1].replace(/"/g, '\\"') + '"');
+            if (decoded && decoded.length >= 10) return decoded;
         } catch (e) {}
     }
 
