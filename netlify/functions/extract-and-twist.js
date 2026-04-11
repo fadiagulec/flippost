@@ -49,20 +49,49 @@ async function fetchInstagramCaption(url) {
     const embedUrl = `https://www.instagram.com/p/${sc}/embed/`;
     const html = await get(embedUrl);
 
-    // Strategy 1: double-escaped JSON blob (common in embed pages)
-    const m1 = html.match(/"text":"([^"]{10,})"/);
-    if (m1) {
+    // Strategy 1: double-escaped JSON blob — Instagram embeds use \"text\":\"...\"
+    // The backslashes are literal characters in the HTML source.
+    const m1escaped = html.match(/\\"text\\":\\"((?:[^\\"]|\\[^"]){10,})\\"/);
+    if (m1escaped) {
         try {
-            return m1[1].replace(/\\n/g, '\n').replace(/\\u[\dA-Fa-f]{4}/g, (u) =>
-                String.fromCharCode(parseInt(u.slice(2), 16))
+            // The captured group still has \\n, \\uXXXX etc. Decode them.
+            const raw = m1escaped[1]
+                .replace(/\\n/g, '\n')
+                .replace(/\\t/g, '\t')
+                .replace(/\\u([\dA-Fa-f]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+                .replace(/\\"/g, '"')
+                .replace(/\\\\/g, '\\');
+            if (raw.length >= 10) return raw;
+        } catch (e) {}
+    }
+
+    // Strategy 1b: un-escaped form (returned when IG serves non-SPA embed)
+    const m1plain = html.match(/"text":"([^"]{10,})"/);
+    if (m1plain) {
+        try {
+            return m1plain[1].replace(/\\n/g, '\n').replace(/\\u([\dA-Fa-f]{4})/g, (_, hex) =>
+                String.fromCharCode(parseInt(hex, 16))
             );
         } catch (e) {}
     }
 
-    // Strategy 2: edge_media_to_caption JSON fragment
-    const m2 = html.match(/"edge_media_to_caption":\{"edges":\[\{"node":\{"text":"((?:[^"\\]|\\.)*)"/);
-    if (m2) {
-        try { return JSON.parse('"' + m2[1] + '"'); } catch (e) { return m2[1]; }
+    // Strategy 2: edge_media_to_caption — escaped form
+    const m2esc = html.match(/edge_media_to_caption\\":\{\\"edges\\":\[\{\\"node\\":\{\\"text\\":\\"((?:[^\\"]|\\[^"]){10,})\\"/);
+    if (m2esc) {
+        try {
+            const raw = m2esc[1]
+                .replace(/\\n/g, '\n')
+                .replace(/\\u([\dA-Fa-f]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+                .replace(/\\"/g, '"')
+                .replace(/\\\\/g, '\\');
+            if (raw.length >= 10) return raw;
+        } catch (e) {}
+    }
+
+    // Strategy 2b: edge_media_to_caption — un-escaped form
+    const m2plain = html.match(/"edge_media_to_caption":\{"edges":\[\{"node":\{"text":"((?:[^"\\]|\\.)*)"/);
+    if (m2plain) {
+        try { return JSON.parse('"' + m2plain[1] + '"'); } catch (e) { return m2plain[1]; }
     }
 
     // Strategy 3: og:description meta tag
