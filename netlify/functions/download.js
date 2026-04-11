@@ -1,10 +1,9 @@
 const fetch = require('node-fetch');
 
 const COBALT_INSTANCES = [
-  'https://cobalt.api.timelessnesses.me/',
-  'https://co.wuk.sh/',
-  'https://cobalt-api.nico.moe/',
-  'https://cobalt.privacydev.net/'
+  'https://dwnld.nichlov.com/',
+  'https://cobalt.eepy.cat/',
+  'https://cobalt.api.lostluma.dev/',
 ];
 
 exports.handler = async (event) => {
@@ -22,28 +21,33 @@ exports.handler = async (event) => {
     const { url } = JSON.parse(event.body || '{}');
     if (!url) return { statusCode: 400, headers, body: JSON.stringify({ error: 'URL required' }) };
 
+    let lastError = null;
+
     for (const instance of COBALT_INSTANCES) {
       try {
         const res = await fetch(instance, {
           method: 'POST',
           headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url, videoQuality: 'max', downloadMode: 'auto' }),
+          body: JSON.stringify({ url }),
           timeout: 8000
         });
 
-        if (!res.ok) continue;
         const data = await res.json();
 
-        if (data.status === 'error' || !data.status) continue;
+        // Skip dead/error responses
+        if (data.status === 'error') {
+          lastError = data.text || 'instance error';
+          continue;
+        }
 
         return { statusCode: 200, headers, body: JSON.stringify(data) };
       } catch (e) {
-        console.log(`Instance ${instance} failed:`, e.message);
+        lastError = e.message;
         continue;
       }
     }
 
-    return { statusCode: 503, headers, body: JSON.stringify({ error: 'All download instances unavailable' }) };
+    return { statusCode: 502, headers, body: JSON.stringify({ error: lastError || 'All instances failed' }) };
   } catch (err) {
     return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
   }
