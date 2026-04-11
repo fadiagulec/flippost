@@ -1,5 +1,10 @@
 // Backend URL
+// /download is still proxied through the Railway backend (which has working
+// cobalt-based media extraction). /extract-and-twist is served by a Netlify
+// Function because the Railway container is missing ffmpeg, which crashes
+// the audio-transcription pipeline it used to rely on.
 const BACKEND_URL = 'https://web-production-8afc3.up.railway.app';
+const EXTRACT_URL = '/.netlify/functions/extract-and-twist';
 
 // Platform detection patterns
 const platformPatterns = {
@@ -215,13 +220,17 @@ async function handleExtractAndTwist() {
     container.innerHTML = '<div class="loading">\u{1F504} Processing your content, please wait...</div>';
 
     try {
-        const res = await fetch(`${BACKEND_URL}/extract-and-twist`, {
+        const res = await fetch(EXTRACT_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
         });
 
-        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Extraction failed'); }
+        if (!res.ok) {
+            let msg = 'Extraction failed';
+            try { const e = await res.json(); msg = e.error || msg; } catch (_) {}
+            throw new Error(msg);
+        }
 
         const data = await res.json();
         displayResults(data, platform);
