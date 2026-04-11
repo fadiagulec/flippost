@@ -13,13 +13,13 @@ const platformPatterns = {
 };
 
 const platformEmojis = {
-    instagram: '📷',
-    tiktok: '🎵',
-    youtube: '▶️',
-    linkedin: '💼',
-    facebook: '👥',
-    x: '𝕏',
-    threads: '🧵'
+    instagram: 'ð·',
+    tiktok: 'ðµ',
+    youtube: 'â¶ï¸',
+    linkedin: 'ð¼',
+    facebook: 'ð¥',
+    x: 'ð',
+    threads: 'ð§µ'
 };
 
 // Initialize tab navigation
@@ -79,7 +79,7 @@ document.getElementById('urlInput').addEventListener('input', (e) => {
     }
 });
 
-// ── DOWNLOAD ──────────────────────────────────────────────
+// ââ DOWNLOAD ââââââââââââââââââââââââââââââââââââââââââââââ
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
 
 async function handleDownload() {
@@ -95,27 +95,54 @@ async function handleDownload() {
     btn.textContent = '⏳ Downloading...';
 
     try {
-        const res = await fetch(`${BACKEND_URL}/download`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
+        // First try the backend
+        let backendSucceeded = false;
+        try {
+            const res = await fetch(`${BACKEND_URL}/download`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url }),
+                signal: AbortSignal.timeout(10000)
+            });
 
-        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Download failed'); }
-
-        const data = await res.json();
-
-        if (data.items && Array.isArray(data.items)) {
-            data.items.forEach((item, idx) => triggerDownload(item, `${platform}-item-${idx}`));
-        } else if (data.video) {
-            downloadBase64(data.video, `${platform}-video.mp4`, 'video/mp4');
-        } else if (data.image) {
-            downloadBase64(data.image, `${platform}-image.jpg`, 'image/jpeg');
-        } else {
-            throw new Error('No downloadable content found');
+            if (res.ok) {
+                const result = await res.json();
+                if (result.items && Array.isArray(result.items)) {
+                    result.items.forEach((item, idx) => triggerDownload(item, `${platform}-item-${idx}`));
+                    backendSucceeded = true;
+                } else if (result.video) {
+                    downloadBase64(result.video, `${platform}-video.mp4`, 'video/mp4');
+                    backendSucceeded = true;
+                } else if (result.image) {
+                    downloadBase64(result.image, `${platform}-image.jpg`, 'image/jpeg');
+                    backendSucceeded = true;
+                }
+            }
+        } catch (backendErr) {
+            // Backend unavailable or returned no content, fall through to helper
+            console.warn('Backend download failed:', backendErr.message);
         }
 
-        showSuccess('✅ Download started!', 'errorMessage');
+        if (backendSucceeded) {
+            showSuccess('✅ Download started!', 'errorMessage');
+        } else {
+            // Fallback: open a free download helper in a new tab
+            const encodedUrl = encodeURIComponent(url);
+            let helperUrl;
+            if (platform === 'instagram') {
+                helperUrl = 'https://snapinsta.app/?url=' + encodedUrl;
+            } else if (platform === 'tiktok') {
+                helperUrl = 'https://snaptik.app/?url=' + encodedUrl;
+            } else if (platform === 'youtube') {
+                helperUrl = 'https://yt1s.com/?q=' + encodedUrl;
+            } else if (platform === 'facebook') {
+                helperUrl = 'https://fdown.net/?URLz=' + encodedUrl;
+            } else {
+                helperUrl = 'https://snapinsta.app/?url=' + encodedUrl;
+            }
+            window.open(helperUrl, '_blank');
+            showSuccess('🔗 Opening download helper...', 'errorMessage');
+        }
     } catch (err) {
         showError(`Download error: ${err.message}`, 'errorMessage');
     } finally {
@@ -123,6 +150,7 @@ async function handleDownload() {
         btn.textContent = orig;
     }
 }
+
 
 function triggerDownload(item, filename) {
     if (item.video) downloadBase64(item.video, `${filename}.mp4`, 'video/mp4');
@@ -141,7 +169,7 @@ function downloadBase64(base64Data, filename, mimeType = 'application/octet-stre
     } catch (e) { console.error('Download error:', e); }
 }
 
-// ── EXTRACT & FLIP ─────────────────────────────────────────
+// ââ EXTRACT & FLIP âââââââââââââââââââââââââââââââââââââââââ
 document.getElementById('extractBtn').addEventListener('click', handleExtractAndTwist);
 
 async function handleExtractAndTwist() {
@@ -154,10 +182,10 @@ async function handleExtractAndTwist() {
     const btn = document.getElementById('extractBtn');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '⏳ Extracting & Flipping...';
+    btn.textContent = 'â³ Extracting & Flipping...';
 
     const container = document.getElementById('resultsContainer');
-    container.innerHTML = '<div class="loading">🔄 Processing your content, please wait...</div>';
+    container.innerHTML = '<div class="loading">ð Processing your content, please wait...</div>';
 
     try {
         const res = await fetch(`${BACKEND_URL}/extract-and-twist`, {
@@ -187,7 +215,7 @@ function displayResults(data, platform) {
     if (data.carousel_images && data.carousel_images.length > 0) {
         const wrap = document.createElement('div');
         wrap.className = 'carousel-preview';
-        wrap.innerHTML = '<h3>📸 Carousel Images</h3>';
+        wrap.innerHTML = '<h3>ð¸ Carousel Images</h3>';
         data.carousel_images.forEach((img, i) => {
             const div = document.createElement('div');
             div.className = 'carousel-image-wrapper';
@@ -203,8 +231,8 @@ function displayResults(data, platform) {
     const isCaption = data.original && !data.original.includes('\n') && data.original.length < 500;
 
     appendSection(container, isCaption ? 'Original Caption' : 'Original Transcript', data.original, false);
-    appendSection(container, '✨ Flipped Version', data.twisted, true);
-    if (data.prompt) appendSection(container, '🎯 Proven Hook', data.prompt, true);
+    appendSection(container, 'â¨ Flipped Version', data.twisted, true);
+    if (data.prompt) appendSection(container, 'ð¯ Proven Hook', data.prompt, true);
 }
 
 function appendSection(container, title, text, copyable) {
@@ -214,14 +242,14 @@ function appendSection(container, title, text, copyable) {
     if (copyable) {
         const btn = document.createElement('button');
         btn.className = 'copy-btn';
-        btn.textContent = '📋 Copy';
+        btn.textContent = 'ð Copy';
         btn.onclick = () => copyToClipboard(btn);
         div.appendChild(btn);
     }
     container.appendChild(div);
 }
 
-// ── SCRIPT REWRITE ─────────────────────────────────────────
+// ââ SCRIPT REWRITE âââââââââââââââââââââââââââââââââââââââââ
 document.getElementById('rewriteBtn').addEventListener('click', handleRewriteScript);
 
 async function handleRewriteScript() {
@@ -231,10 +259,10 @@ async function handleRewriteScript() {
     const btn = document.getElementById('rewriteBtn');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '⏳ Rewriting...';
+    btn.textContent = 'â³ Rewriting...';
 
     const container = document.getElementById('scriptResultsContainer');
-    container.innerHTML = '<div class="loading">✨ Creating your flipped version...</div>';
+    container.innerHTML = '<div class="loading">â¨ Creating your flipped version...</div>';
 
     try {
         const res = await fetch(`${BACKEND_URL}/generate`, {
@@ -248,8 +276,8 @@ async function handleRewriteScript() {
         const data = await res.json();
         container.innerHTML = '';
         appendSection(container, 'Original Script', script, false);
-        appendSection(container, '✨ Flipped Version', data.twisted, true);
-        if (data.prompt) appendSection(container, '🎯 Proven Hook', data.prompt, true);
+        appendSection(container, 'â¨ Flipped Version', data.twisted, true);
+        if (data.prompt) appendSection(container, 'ð¯ Proven Hook', data.prompt, true);
     } catch (err) {
         showError(`Error: ${err.message}`, 'scriptErrorMessage');
         container.innerHTML = '';
@@ -259,7 +287,7 @@ async function handleRewriteScript() {
     }
 }
 
-// ── NICHE IDEAS ─────────────────────────────────────────────
+// ââ NICHE IDEAS âââââââââââââââââââââââââââââââââââââââââââââ
 document.getElementById('generateIdeasBtn').addEventListener('click', handleGenerateIdeas);
 
 async function handleGenerateIdeas() {
@@ -270,10 +298,10 @@ async function handleGenerateIdeas() {
     const btn = document.getElementById('generateIdeasBtn');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '⏳ Generating...';
+    btn.textContent = 'â³ Generating...';
 
     const container = document.getElementById('ideasResultsContainer');
-    container.innerHTML = '<div class="loading">🚀 Creating viral script ideas...</div>';
+    container.innerHTML = '<div class="loading">ð Creating viral script ideas...</div>';
 
     try {
         const res = await fetch(`${BACKEND_URL}/generate`, {
@@ -286,8 +314,8 @@ async function handleGenerateIdeas() {
 
         const data = await res.json();
         container.innerHTML = '';
-        appendSection(container, '💡 Your 3 Viral Script Ideas', data.twisted, true);
-        if (data.prompt) appendSection(container, '🎯 Pro Tips', data.prompt, true);
+        appendSection(container, 'ð¡ Your 3 Viral Script Ideas', data.twisted, true);
+        if (data.prompt) appendSection(container, 'ð¯ Pro Tips', data.prompt, true);
     } catch (err) {
         showError(`Error: ${err.message}`, 'ideasErrorMessage');
         container.innerHTML = '';
@@ -297,12 +325,12 @@ async function handleGenerateIdeas() {
     }
 }
 
-// ── UTILITIES ───────────────────────────────────────────────
+// ââ UTILITIES âââââââââââââââââââââââââââââââââââââââââââââââ
 function copyToClipboard(button) {
     const text = button.previousElementSibling.textContent;
     navigator.clipboard.writeText(text).then(() => {
         const orig = button.textContent;
-        button.textContent = '✅ Copied!';
+        button.textContent = 'â Copied!';
         setTimeout(() => { button.textContent = orig; }, 2000);
     });
 }
