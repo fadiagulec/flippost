@@ -49,43 +49,46 @@ async function fetchInstagramCaption(url) {
     const embedUrl = `https://www.instagram.com/p/${sc}/embed/`;
     const html = await get(embedUrl);
 
-    // Strategy 1: The embed page wraps caption data in a double-escaped JSON blob.
-    // Raw HTML looks like:  \"text\":\"caption text here\\nmore text\"
-    // We grab everything between the opening \":\" and the closing \" and let
-    // JSON.parse handle all escape sequences (\\n, \\uXXXX, surrogate pairs, etc.)
-    // by wrapping the captured fragment in a JSON string literal.
-    const m1 = html.match(/\\"text\\":\\"([\s\S]{10,?}?)\\"\s*[,}]/);
-    if (m1) {
-        try {
-            // m1[1] still has one layer of JSON escaping (\\n, \\uD83D, etc.)
-            // JSON.parse("\"...\") handles it correctly including surrogate pairs.
-            const decoded = JSON.parse('"' + m1[1].replace(/"/g, '\\"') + '"');
-            if (decoded && decoded.length >= 10) return decoded;
-        } catch (e) {}
+    // Strategy 1: walk-based extraction for the escaped embed blob.
+    // The HTML contains: \"text\":\"VALUE\" where VALUE has \\n and \\uXXXX sequences.
+    // We locate the marker, walk forward until we hit backslash-quote (the closing
+    // delimiter), then reduce one escaping layer before JSON.parse so surrogate
+    // pairs and emoji decode correctly.
+    const decodeEscapedValue = (raw) => {
+        const fixed = raw
+            .replace(/\\\\u/g, '\\u')   // \\uXXXX -> \uXXXX
+            .replace(/\\\\n/g, '\\n')   // \\n -> \n
+            .replace(/\\\\t/g, '\\t')   // \\t -> \t
+            .replace(/\\\\r/g, '\\r');
+        return JSON.parse('"' + fixed + '"');
+    };
+
+    const marker = '\\"text\\":\\"';
+    const mStart = html.indexOf(marker);
+    if (mStart >= 0) {
+        const valStart = mStart + marker.length;
+        let i = valStart;
+        let buf = '';
+        while (i < html.length) {
+            if (html[i] === '\\' && html[i + 1] === '"') break;
+            buf += html[i++];
+            if (buf.length > 8000) break;
+        }
+        if (buf.length >= 10) {
+            try {
+                const decoded = decodeEscapedValue(buf);
+                if (decoded && decoded.length >= 10) return decoded;
+            } catch (e) {}
+        }
     }
 
-    // Strategy 1b: un-escaped form (returned when IG serves a non-SPA embed page)
+    // Strategy 1b: un-escaped form (some embed responses skip the outer encoding)
     const m1plain = html.match(/"text":"([^"]{10,})"/);
     if (m1plain) {
         try { return JSON.parse('"' + m1plain[1] + '"'); } catch (e) { return m1plain[1]; }
     }
 
-    // Strategy 2: edge_media_to_caption — escaped form
-    const m2esc = html.match(/edge_media_to_caption\\":\{\\"edges\\":\[\{\\"node\\":\{\\"text\\":\\"([\s\S]{10,?}?)\\"\s*[,}]/);
-    if (m2esc) {
-        try {
-            const decoded = JSON.parse('"' + m2esc[1].replace(/"/g, '\\"') + '"');
-            if (decoded && decoded.length >= 10) return decoded;
-        } catch (e) {}
-    }
-
-    // Strategy 2b: edge_media_to_caption — un-escaped form
-    const m2plain = html.match(/"edge_media_to_caption":\{"edges":\[\{"node":\{"text":"((?:[^"\\]|\\.)*)"/);
-    if (m2plain) {
-        try { return JSON.parse('"' + m2plain[1] + '"'); } catch (e) { return m2plain[1]; }
-    }
-
-    // Strategy 3: og:description meta tag
+    // Strategy 2: og:description meta tag
     const m3 = html.match(/<meta\s+property=["']og:description["']\s+content=["']([^"']{10,})["']/i)
                || html.match(/<meta\s+content=["']([^"']{10,})["']\s+property=["']og:description["']/i);
     if (m3) return m3[1];
