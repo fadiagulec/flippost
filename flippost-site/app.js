@@ -1,9 +1,4 @@
-// Backend URL
-// /download is still proxied through the Railway backend (which has working
-// cobalt-based media extraction). /extract-and-twist is served by a Netlify
-// Function because the Railway container is missing ffmpeg, which crashes
-// the audio-transcription pipeline it used to rely on.
-const BACKEND_URL = 'https://web-production-8afc3.up.railway.app';
+// Backend URLs — all endpoints are now Netlify Functions (no external Railway dependency).
 const EXTRACT_URL = '/.netlify/functions/extract-and-twist';
 
 // Platform detection patterns
@@ -84,121 +79,41 @@ document.getElementById('urlInput').addEventListener('input', (e) => {
     }
 });
 
-// ── DOWNLOAD ─────────────────────────────────────────────
+// ── DOWNLOAD / SAVE MEDIA ────────────────────────────────
+// Media downloading from social platforms is inherently unreliable when done
+// via third-party scrapers. Instead we open the original post so the user can
+// save directly from the native app/site (long-press to save on mobile, or
+// use the platform's built-in save/download option). This is 100% reliable
+// and doesn't depend on any scraper service staying online.
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
 
-// cobalt.tools is an open-source media downloader that works from the browser.
-// It's the most reliable free API for Instagram, TikTok, YouTube, etc.
-// https://github.com/imputnet/cobalt
-const COBALT_API = 'https://api.cobalt.tools/api/json';
-
-// Trigger a browser download by creating a hidden anchor tag and clicking it.
-function triggerAnchorDownload(fileUrl, filename) {
-    const a = document.createElement('a');
-    a.href = fileUrl;
-    if (filename) a.download = filename;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    setTimeout(() => {
-        if (a.parentNode) document.body.removeChild(a);
-    }, 1000);
-}
-
-// Open the snapinsta.app fallback helper in a new tab when cobalt fails.
-function openSnapinstaFallback(url) {
-    const helperUrl = 'https://snapinsta.app/?url=' + encodeURIComponent(url);
-    window.open(helperUrl, '_blank', 'noopener,noreferrer');
-}
-
-async function handleDownload() {
+function handleDownload() {
     const urlInput = document.getElementById('urlInput');
     const url = urlInput.value.trim();
     if (!url) { showError('Please enter a URL first', 'errorMessage'); return; }
 
-    const downloadBtn = document.getElementById('downloadBtn');
-    const orig = downloadBtn.innerHTML;
-    downloadBtn.disabled = true;
-    downloadBtn.innerHTML = '\u23F3 Downloading...';
-
     const platform = detectPlatform(url);
-    const helpers = {
-        instagram: 'https://snapinsta.app/',
-        tiktok: 'https://snaptik.app/',
-        youtube: 'https://yt1s.com/',
-        x: 'https://twittervideodownloader.com/',
-        facebook: 'https://fdown.net/'
+
+    // Platform-specific save instructions
+    const saveInstructions = {
+        instagram: 'Tap the bookmark icon to save, or long-press the image/video to download.',
+        tiktok: 'Tap the share arrow, then "Save video" to download directly.',
+        youtube: 'Use the download button below the video (YouTube Premium) or save to Watch Later.',
+        x: 'Tap the share icon, then "Bookmark" or long-press media to save.',
+        facebook: 'Tap the three dots menu, then "Save video" or "Save photo".',
+        linkedin: 'Tap the three dots menu on the post to save it.',
+        threads: 'Tap the share icon to save or repost.'
     };
-    const helperUrl = helpers[platform] || `https://savefrom.net/#url=${encodeURIComponent(url)}`;
 
-    try {
-        // Primary path: call the Railway backend directly. It returns the full
-        // video as base64 in `videoData`, so we never redirect the user off-site.
-        const resp = await fetch(`${BACKEND_URL}/download`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
+    const instruction = saveInstructions[platform] || 'Use the save/download option in the app.';
 
-        if (!resp.ok) throw new Error(`backend ${resp.status}`);
-        const data = await resp.json();
+    // Open the original post in a new tab
+    window.open(url, '_blank', 'noopener,noreferrer');
 
-        if (data && data.success && data.videoData) {
-            const ext = (data.ext || '.mp4').replace(/^\.?/, '.');
-            const mime = ext === '.mp4' ? 'video/mp4' :
-                         ext === '.webm' ? 'video/webm' :
-                         ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
-                         ext === '.png' ? 'image/png' : 'application/octet-stream';
-            downloadBase64(data.videoData, `flipit-${platform || 'media'}${ext}`, mime);
-            showSuccess('\u2705 Download started!', 'errorMessage');
-        } else if (data && data.status === 'picker' && Array.isArray(data.picker) && data.picker.length > 0) {
-            data.picker.forEach((item, i) => setTimeout(() => {
-                if (item.videoData) {
-                    downloadBase64(item.videoData, `flipit-${i + 1}.mp4`, 'video/mp4');
-                } else if (item.url) {
-                    const a = document.createElement('a');
-                    a.href = item.url; a.target = '_blank'; a.download = `flipit-${i + 1}`;
-                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-                }
-            }, i * 700));
-            showSuccess(`\u2705 Downloading ${data.picker.length} files!`, 'errorMessage');
-        } else if (data && (data.status === 'redirect' || data.status === 'stream' || data.status === 'tunnel') && data.url) {
-            const a = document.createElement('a');
-            a.href = data.url; a.target = '_blank'; a.download = 'flipit-media';
-            document.body.appendChild(a); a.click(); document.body.removeChild(a);
-            showSuccess('\u2705 Download started!', 'errorMessage');
-        } else {
-            throw new Error('no-video-data');
-        }
-    } catch(e) {
-        console.error('download failed:', e);
-        window.open(helperUrl, '_blank');
-        try { await navigator.clipboard.writeText(url); } catch(e2) {}
-        showSuccess('\u{1F4CB} URL copied! Paste it on the download page that just opened.', 'errorMessage');
-    }
+    // Copy URL to clipboard for convenience
+    navigator.clipboard.writeText(url).catch(() => {});
 
-    downloadBtn.disabled = false;
-    downloadBtn.innerHTML = orig;
-}
-
-
-function triggerDownload(item, filename) {
-    if (item.video) downloadBase64(item.video, `${filename}.mp4`, 'video/mp4');
-    else if (item.image) downloadBase64(item.image, `${filename}.jpg`, 'image/jpeg');
-}
-
-function downloadBase64(base64Data, filename, mimeType = 'application/octet-stream') {
-    try {
-        const bytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
-        const blob = new Blob([bytes], { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = filename;
-        document.body.appendChild(a); a.click();
-        document.body.removeChild(a); URL.revokeObjectURL(url);
-    } catch (e) { console.error('Download error:', e); }
+    showSuccess(`\u2705 Post opened! ${instruction}`, 'errorMessage');
 }
 
 // ── EXTRACT & FLIP ───────────────────────────────────────

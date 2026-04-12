@@ -111,6 +111,87 @@ async function fetchYoutubeCaption(url) {
     throw new Error('youtube-oembed-empty');
 }
 
+// Generic OG/meta-tag scraper for platforms without dedicated APIs.
+// Works for X/Twitter, Facebook, LinkedIn, Threads, and any page with
+// standard Open Graph or Twitter Card meta tags.
+async function fetchGenericCaption(url) {
+    const html = await get(url);
+
+    // Try og:description first (most common)
+    const ogDesc = html.match(/<meta\s+(?:property|name)=["']og:description["']\s+content=["']([^"']{5,})["']/i)
+                || html.match(/<meta\s+content=["']([^"']{5,})["']\s+(?:property|name)=["']og:description["']/i);
+    if (ogDesc && ogDesc[1].length >= 5) {
+        return decodeHtmlEntities(ogDesc[1]);
+    }
+
+    // Try twitter:description
+    const twDesc = html.match(/<meta\s+(?:property|name)=["']twitter:description["']\s+content=["']([^"']{5,})["']/i)
+                || html.match(/<meta\s+content=["']([^"']{5,})["']\s+(?:property|name)=["']twitter:description["']/i);
+    if (twDesc && twDesc[1].length >= 5) {
+        return decodeHtmlEntities(twDesc[1]);
+    }
+
+    // Try og:title as last resort
+    const ogTitle = html.match(/<meta\s+(?:property|name)=["']og:title["']\s+content=["']([^"']{5,})["']/i)
+                 || html.match(/<meta\s+content=["']([^"']{5,})["']\s+(?:property|name)=["']og:title["']/i);
+    if (ogTitle && ogTitle[1].length >= 5) {
+        return decodeHtmlEntities(ogTitle[1]);
+    }
+
+    // Try <title> tag
+    const titleTag = html.match(/<title>([^<]{5,})<\/title>/i);
+    if (titleTag && titleTag[1].length >= 5) {
+        return decodeHtmlEntities(titleTag[1]).trim();
+    }
+
+    throw new Error('no-caption-found');
+}
+
+function decodeHtmlEntities(str) {
+    return str
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(/&#x27;/g, "'")
+        .replace(/&#x2F;/g, '/')
+        .replace(/&nbsp;/g, ' ');
+}
+
+// X/Twitter: use the syndication API which returns tweet text reliably
+async function fetchXCaption(url) {
+    // Extract tweet ID from URL
+    const m = url.match(/(?:twitter\.com|x\.com)\/\w+\/status\/(\d+)/);
+    if (m) {
+        try {
+            const data = await get(`https://cdn.syndication.twimg.com/tweet-result?id=${m[1]}&token=0`);
+            const j = JSON.parse(data);
+            if (j.text && j.text.length >= 5) return j.text;
+        } catch (e) {
+            // Syndication API failed, fall through to generic scraping
+        }
+    }
+    return fetchGenericCaption(url);
+}
+
+// Facebook: use oEmbed first, fall back to generic OG scraping
+async function fetchFacebookCaption(url) {
+    try {
+        const data = await get(`https://www.facebook.com/plugins/post/oembed.json/?url=${encodeURIComponent(url)}`);
+        const j = JSON.parse(data);
+        if (j.title && j.title.length >= 5) return j.title;
+        // oEmbed HTML blob may contain the post text
+        if (j.html) {
+            const textMatch = j.html.match(/<p[^>]*>([^<]{5,})<\/p>/);
+            if (textMatch) return decodeHtmlEntities(textMatch[1]);
+        }
+    } catch (e) {
+        // oEmbed failed, fall through
+    }
+    return fetchGenericCaption(url);
+}
+
 // ── FLIP ENGINE ──────────────────────────────────────────
 
 const HOOK_TEMPLATES = {
@@ -265,14 +346,23 @@ exports.handler = async (event) => {
 
         let caption = '';
 
+        // Multi-strategy extraction: try platform-specific first, then generic OG scraping.
+        // Each platform extractor already has internal fallbacks, plus we wrap with a
+        // final generic fallback so we maximize extraction success across all platforms.
         try {
             if (platform === 'instagram') caption = await fetchInstagramCaption(url);
             else if (platform === 'tiktok') caption = await fetchTikTokCaption(url);
             else if (platform === 'youtube') caption = await fetchYoutubeCaption(url);
-        } catch (e) {
-            // Caption extraction failed - return a graceful fallback rather than an error,
-            // so the user can at least see the flip template with a generic message.
-            caption = '';
+            else if (platform === 'x') caption = await fetchXCaption(url);
+            else if (platform === 'facebook') caption = await fetchFacebookCaption(url);
+            else caption = await fetchGenericCaption(url); // linkedin, threads, unknown
+        } catch (primaryErr) {
+            // Platform-specific extractor failed — try generic OG scraping as last resort
+            try {
+                caption = await fetchGenericCaption(url);
+            } catch (fallbackErr) {
+                caption = '';
+            }
         }
 
         if (!caption || caption.length < 5) {
