@@ -80,21 +80,62 @@ document.getElementById('urlInput').addEventListener('input', (e) => {
 });
 
 // ── DOWNLOAD / SAVE MEDIA ────────────────────────────────
-// Media downloading from social platforms is inherently unreliable when done
-// via third-party scrapers. Instead we open the original post so the user can
-// save directly from the native app/site (long-press to save on mobile, or
-// use the platform's built-in save/download option). This is 100% reliable
-// and doesn't depend on any scraper service staying online.
+const DOWNLOAD_URL = '/.netlify/functions/download';
+
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
 
-function handleDownload() {
+async function handleDownload() {
     const urlInput = document.getElementById('urlInput');
     const url = urlInput.value.trim();
     if (!url) { showError('Please enter a URL first', 'errorMessage'); return; }
 
     const platform = detectPlatform(url);
+    const btn = document.getElementById('downloadBtn');
+    const origText = btn.textContent;
 
-    // Platform-specific save instructions
+    btn.disabled = true;
+    btn.textContent = '\u23F3 Downloading...';
+
+    try {
+        const res = await fetch(DOWNLOAD_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url })
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.downloadUrl) {
+            // Trigger actual file download
+            triggerDownload(data.downloadUrl, data.filename);
+            showSuccess('\u2705 Download started!', 'errorMessage');
+        } else {
+            // All extraction methods failed — fall back to opening the post
+            fallbackOpenPost(url, platform);
+        }
+    } catch (err) {
+        console.error('Download error:', err);
+        // Network error — fall back to opening the post
+        fallbackOpenPost(url, platform);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
+    }
+}
+
+function triggerDownload(downloadUrl, filename) {
+    // Open the direct media URL — browser will download video/image files
+    const a = document.createElement('a');
+    a.href = downloadUrl;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    if (filename) a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+}
+
+function fallbackOpenPost(url, platform) {
     const saveInstructions = {
         instagram: 'Tap the bookmark icon to save, or long-press the image/video to download.',
         tiktok: 'Tap the share arrow, then "Save video" to download directly.',
@@ -104,16 +145,9 @@ function handleDownload() {
         linkedin: 'Tap the three dots menu on the post to save it.',
         threads: 'Tap the share icon to save or repost.'
     };
-
     const instruction = saveInstructions[platform] || 'Use the save/download option in the app.';
-
-    // Open the original post in a new tab
     window.open(url, '_blank', 'noopener,noreferrer');
-
-    // Copy URL to clipboard for convenience
-    navigator.clipboard.writeText(url).catch(() => {});
-
-    showSuccess(`\u2705 Post opened! ${instruction}`, 'errorMessage');
+    showSuccess(`\u2139\uFE0F Direct download unavailable. Post opened \u2014 ${instruction}`, 'errorMessage');
 }
 
 // ── EXTRACT & FLIP ───────────────────────────────────────
