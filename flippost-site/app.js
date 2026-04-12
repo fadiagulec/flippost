@@ -111,9 +111,12 @@ async function handleDownload() {
             // If carousel with multiple images, show download panel
             if (data.carousel && data.carousel.length > 1) {
                 window._lastCarouselCount = data.carousel.length;
+                window._lastCarouselUrls = data.carousel.map(item => item.url);
                 showCarouselDownloads(data.carousel, data.platform);
                 showSuccess(`\u{1F3A0} Found ${data.carousel.length} media items! Click each to download.`, 'errorMessage');
             } else {
+                window._lastCarouselCount = 0;
+                window._lastCarouselUrls = [data.downloadUrl];
                 window.open(data.downloadUrl, '_blank');
                 const mediaType = data.type === 'image' ? '\u{1F5BC}\uFE0F Image' : '\u{1F3AC} Video';
                 showSuccess(`\u2705 ${mediaType} download started!`, 'errorMessage');
@@ -353,32 +356,98 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
         div.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
-    // Image Prompt click handler
-    imageBtn.addEventListener('click', () => {
+    // Image Prompt click handler — uses Claude Vision to analyze actual images
+    imageBtn.addEventListener('click', async () => {
         const existing = container.querySelector('.image-prompt-section');
         if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
 
-        const prompts = buildImagePrompts(flippedScript, originalCaption, platform, carouselCount);
-        const div = document.createElement('div');
-        div.className = 'result-section image-prompt-section';
-        div.style.borderLeftColor = '#c2185b';
+        const imageUrls = window._lastCarouselUrls || [];
 
-        let html = '<h3>\u{1F5BC}\uFE0F Image Creation Prompts</h3>';
-        html += '<p style="color:#777;font-size:14px;margin-bottom:14px;">Paste into Midjourney, DALL-E, Ideogram, Leonardo, or any AI image tool.</p>';
+        // If we have actual image URLs, analyze them with AI
+        if (imageUrls.length > 0) {
+            imageBtn.disabled = true;
+            imageBtn.textContent = '\u23F3 Analyzing images...';
 
-        prompts.forEach((p, i) => {
-            html += `
-                <div style="margin-bottom:16px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;">
-                    <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;text-transform:uppercase;">${p.label}</p>
-                    <p class="result-text" style="margin-bottom:8px;">${escapeHtml(p.prompt)}</p>
-                    <button class="copy-btn" style="background:#c2185b;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='\u2705 Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
-                </div>
+            const div = document.createElement('div');
+            div.className = 'result-section image-prompt-section';
+            div.style.borderLeftColor = '#c2185b';
+            div.innerHTML = `
+                <h3>\u{1F5BC}\uFE0F AI Image Prompts — Analyzing ${imageUrls.length} image${imageUrls.length > 1 ? 's' : ''}...</h3>
+                <p style="color:#777;font-size:14px;margin-bottom:14px;">Claude Vision is analyzing each image to create recreation prompts for Midjourney, DALL-E, Ideogram, or Leonardo.</p>
+                <div id="imagePromptsContainer"><div class="loading">\u{1F50D} Analyzing images with AI vision...</div></div>
             `;
-        });
+            container.appendChild(div);
+            div.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-        div.innerHTML = html;
-        container.appendChild(div);
-        div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            const promptsContainer = document.getElementById('imagePromptsContainer');
+            let completedCount = 0;
+            promptsContainer.innerHTML = '';
+
+            // Analyze each image
+            for (let i = 0; i < imageUrls.length; i++) {
+                const slideDiv = document.createElement('div');
+                slideDiv.style.cssText = 'margin-bottom:16px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;';
+                slideDiv.innerHTML = `
+                    <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;text-transform:uppercase;">\u{1F5BC}\uFE0F Image ${i + 1} of ${imageUrls.length}</p>
+                    <p class="result-text" style="margin-bottom:8px;color:#999;">\u23F3 Analyzing...</p>
+                `;
+                promptsContainer.appendChild(slideDiv);
+
+                try {
+                    const res = await fetch('/.netlify/functions/analyze-image', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ imageUrl: imageUrls[i], slideNumber: i + 1 })
+                    });
+                    const data = await res.json();
+
+                    if (res.ok && data.prompt) {
+                        slideDiv.innerHTML = `
+                            <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;text-transform:uppercase;">\u{1F5BC}\uFE0F Image ${i + 1} of ${imageUrls.length}</p>
+                            <p class="result-text" style="margin-bottom:8px;">${escapeHtml(data.prompt)}</p>
+                            <button class="copy-btn" style="background:#c2185b;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='\u2705 Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
+                        `;
+                    } else {
+                        slideDiv.querySelector('.result-text').textContent = '\u274C Could not analyze this image: ' + (data.error || 'Unknown error');
+                        slideDiv.querySelector('.result-text').style.color = '#c2185b';
+                    }
+                } catch (err) {
+                    slideDiv.querySelector('.result-text').textContent = '\u274C Error analyzing image: ' + err.message;
+                    slideDiv.querySelector('.result-text').style.color = '#c2185b';
+                }
+
+                completedCount++;
+                div.querySelector('h3').textContent = `\u{1F5BC}\uFE0F AI Image Prompts — ${completedCount}/${imageUrls.length} analyzed`;
+            }
+
+            div.querySelector('h3').textContent = `\u{1F5BC}\uFE0F AI Image Prompts — ${imageUrls.length} image${imageUrls.length > 1 ? 's' : ''} analyzed`;
+            imageBtn.disabled = false;
+            imageBtn.textContent = '\u{1F5BC}\uFE0F IMAGE PROMPT';
+
+        } else {
+            // No images downloaded — fall back to topic-based prompts
+            const prompts = buildImagePrompts(flippedScript, originalCaption, platform, carouselCount);
+            const div = document.createElement('div');
+            div.className = 'result-section image-prompt-section';
+            div.style.borderLeftColor = '#c2185b';
+
+            let html = '<h3>\u{1F5BC}\uFE0F Image Creation Prompts</h3>';
+            html += '<p style="color:#777;font-size:14px;margin-bottom:14px;">Download images first for AI-analyzed prompts, or use these topic-based prompts for Midjourney, DALL-E, Ideogram, or Leonardo.</p>';
+
+            prompts.forEach((p, i) => {
+                html += `
+                    <div style="margin-bottom:16px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;">
+                        <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;text-transform:uppercase;">${p.label}</p>
+                        <p class="result-text" style="margin-bottom:8px;">${escapeHtml(p.prompt)}</p>
+                        <button class="copy-btn" style="background:#c2185b;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='\u2705 Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
+                    </div>
+                `;
+            });
+
+            div.innerHTML = html;
+            container.appendChild(div);
+            div.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
     });
 }
 
