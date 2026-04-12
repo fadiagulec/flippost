@@ -107,12 +107,14 @@ async function handleDownload() {
 
         if (res.ok && data.downloadUrl) {
             btn.textContent = '\u2B07\uFE0F Starting download...';
-            // Open download URL in new tab — this triggers the actual file download
             window.open(data.downloadUrl, '_blank');
-            showSuccess(`\u2705 Download started! (via ${data.source || 'direct'})`, 'errorMessage');
+            showSuccess(`\u2705 Download started!`, 'errorMessage');
+        } else if (res.ok && data.openUrl) {
+            // Platform blocks server-side download — open post with save instructions
+            window.open(data.openUrl, '_blank');
+            showSuccess(`\u{1F4F1} ${data.instruction || 'Save the video from the app directly.'}`, 'errorMessage');
         } else {
-            // All methods failed — show helpful message
-            showError(`\u274C Could not extract download link for this ${platform || ''} post. Try right-clicking the video in the original post and "Save video as..."`, 'errorMessage');
+            showError(`\u274C Could not process this link. Please try again.`, 'errorMessage');
         }
     } catch (err) {
         console.error('Download error:', err);

@@ -1,9 +1,7 @@
 // Netlify function: /download
-// Multi-strategy video download proxy
-// Strategy 1: Microlink API (works great for YouTube)
-// Strategy 2: Instagram embed page video extraction
-// Strategy 3: TikTok embed page video extraction
-// Strategy 4: Direct OG/meta video tag extraction (works for many platforms)
+// Reliable video download — uses Microlink API (best free option)
+// Works great for YouTube. For Instagram/TikTok/X, these platforms
+// block server-side extraction, so we provide direct links to save.
 
 const fetch = require('node-fetch');
 
@@ -35,32 +33,59 @@ exports.handler = async (event) => {
   }
 
   const platform = detectPlatform(url);
-  console.log(`Download request: platform=${platform}, url=${url}`);
 
-  // Try strategies in order based on platform
-  const strategies = getStrategies(platform);
+  // Strategy 1: Microlink API — works reliably for YouTube and some others
+  try {
+    const result = await tryMicrolink(url);
+    if (result) {
+      return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'microlink', platform }) };
+    }
+  } catch (e) {
+    console.log('Microlink failed:', e.message);
+  }
 
-  for (const strategy of strategies) {
+  // Strategy 2: Twitter syndication API — for X/Twitter videos
+  if (platform === 'x') {
     try {
-      console.log(`Trying strategy: ${strategy.name}`);
-      const result = await strategy.fn(url);
-      if (result && result.downloadUrl) {
-        console.log(`Success with ${strategy.name}`);
-        return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: strategy.name }) };
+      const result = await tryTwitter(url);
+      if (result) {
+        return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'twitter', platform }) };
       }
     } catch (e) {
-      console.log(`Strategy ${strategy.name} failed: ${e.message}`);
+      console.log('Twitter syndication failed:', e.message);
     }
   }
 
-  // All strategies failed
+  // Strategy 3: OG video meta tags from page HTML
+  try {
+    const result = await tryOgVideo(url);
+    if (result) {
+      return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'og-meta', platform }) };
+    }
+  } catch (e) {
+    console.log('OG video failed:', e.message);
+  }
+
+  // No download found — return platform-specific save instructions
+  const instructions = {
+    instagram: 'Open the reel in Instagram app → tap ••• → Save → Video will save to your camera roll',
+    tiktok: 'Open in TikTok app → tap Share arrow → tap "Save video"',
+    youtube: 'Use YouTube app download button or YouTube Premium',
+    x: 'Open in X app → tap Share → tap "Bookmark" or use screen recording',
+    facebook: 'Open in Facebook app → tap ••• → Save video',
+    linkedin: 'Open in LinkedIn app → tap ••• → Save',
+    threads: 'Open in Threads app → tap Share → Save'
+  };
+
   return {
-    statusCode: 422,
+    statusCode: 200,
     headers,
     body: JSON.stringify({
-      error: 'Could not extract download link.',
-      fallback: true,
-      platform
+      downloadUrl: null,
+      openUrl: url,
+      platform,
+      instruction: instructions[platform] || 'Open the post and use the app\'s built-in save option',
+      source: 'manual'
     })
   };
 };
@@ -76,280 +101,103 @@ function detectPlatform(url) {
   return 'other';
 }
 
-function getStrategies(platform) {
-  // Order strategies by reliability per platform
-  switch (platform) {
-    case 'youtube':
-      return [
-        { name: 'microlink', fn: tryMicrolink },
-        { name: 'og-video', fn: tryOgVideo }
-      ];
-    case 'instagram':
-      return [
-        { name: 'instagram-embed', fn: tryInstagramEmbed },
-        { name: 'og-video', fn: tryOgVideo },
-        { name: 'microlink', fn: tryMicrolink }
-      ];
-    case 'tiktok':
-      return [
-        { name: 'tiktok-embed', fn: tryTikTokEmbed },
-        { name: 'tikwm', fn: tryTikwm },
-        { name: 'og-video', fn: tryOgVideo },
-        { name: 'microlink', fn: tryMicrolink }
-      ];
-    case 'x':
-      return [
-        { name: 'twitter-syndication', fn: tryTwitterSyndication },
-        { name: 'og-video', fn: tryOgVideo },
-        { name: 'microlink', fn: tryMicrolink }
-      ];
-    case 'facebook':
-      return [
-        { name: 'og-video', fn: tryOgVideo },
-        { name: 'microlink', fn: tryMicrolink }
-      ];
-    default:
-      return [
-        { name: 'og-video', fn: tryOgVideo },
-        { name: 'microlink', fn: tryMicrolink }
-      ];
-  }
-}
-
-// ── STRATEGY: Microlink (reliable for YouTube) ──────────────
 async function tryMicrolink(url) {
-  const apiUrl = `https://api.microlink.io?url=${encodeURIComponent(url)}&video=true&audio=false`;
-  const res = await fetchWithTimeout(apiUrl, {}, 15000);
-  const data = await res.json();
-
-  if (data.status === 'success' && data.data) {
-    const videoUrl = data.data.video && data.data.video.url;
-    if (videoUrl) {
-      return { downloadUrl: videoUrl, filename: null };
-    }
-  }
-  return null;
-}
-
-// ── STRATEGY: Instagram embed page scraping ─────────────────
-async function tryInstagramEmbed(url) {
-  // Normalize to embed URL
-  const match = url.match(/(reel|p)\/([A-Za-z0-9_-]+)/);
-  if (!match) return null;
-
-  const embedUrl = `https://www.instagram.com/${match[1]}/${match[2]}/embed/`;
-  const res = await fetchWithTimeout(embedUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-  }, 12000);
-
-  const html = await res.text();
-
-  // Look for video URL in embed page
-  const videoPatterns = [
-    /video_url":"([^"]+)"/,
-    /"contentUrl":"([^"]+)"/,
-    /og:video:secure_url"\s+content="([^"]+)"/,
-    /og:video"\s+content="([^"]+)"/,
-    /property="og:video"\s+content="([^"]+)"/,
-    /src="(https:\/\/[^"]*\.mp4[^"]*)"/,
-    /video_versions.*?url":"([^"]+)"/
-  ];
-
-  for (const pattern of videoPatterns) {
-    const m = html.match(pattern);
-    if (m && m[1]) {
-      let videoUrl = m[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/');
-      if (videoUrl.startsWith('http')) {
-        return { downloadUrl: videoUrl, filename: `instagram_${match[2]}.mp4` };
-      }
-    }
-  }
-
-  // Look for image if no video
-  const imgPatterns = [
-    /display_url":"([^"]+)"/,
-    /og:image"\s+content="([^"]+)"/,
-    /property="og:image"\s+content="([^"]+)"/
-  ];
-
-  for (const pattern of imgPatterns) {
-    const m = html.match(pattern);
-    if (m && m[1]) {
-      let imgUrl = m[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/');
-      if (imgUrl.startsWith('http')) {
-        return { downloadUrl: imgUrl, filename: `instagram_${match[2]}.jpg` };
-      }
-    }
-  }
-
-  return null;
-}
-
-// ── STRATEGY: TikTok embed page ─────────────────────────────
-async function tryTikTokEmbed(url) {
-  // Try to get video from TikTok's oEmbed
-  const oembedUrl = `https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`;
-  const res = await fetchWithTimeout(oembedUrl, {}, 10000);
-  const data = await res.json();
-
-  if (data.thumbnail_url) {
-    // oEmbed doesn't give video URL directly, but try the page
-    const pageRes = await fetchWithTimeout(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html'
-      },
-      redirect: 'follow'
-    }, 12000);
-
-    const html = await pageRes.text();
-
-    const videoPatterns = [
-      /downloadAddr":"([^"]+)"/,
-      /playAddr":"([^"]+)"/,
-      /"contentUrl":"([^"]+)"/,
-      /og:video:secure_url"\s+content="([^"]+)"/,
-      /og:video"\s+content="([^"]+)"/,
-      /property="og:video"\s+content="([^"]+)"/
-    ];
-
-    for (const pattern of videoPatterns) {
-      const m = html.match(pattern);
-      if (m && m[1]) {
-        let videoUrl = m[1].replace(/\\u0026/g, '&').replace(/\\\//g, '/');
-        if (videoUrl.startsWith('http')) {
-          return { downloadUrl: videoUrl, filename: 'tiktok_video.mp4' };
-        }
-      }
-    }
-  }
-
-  return null;
-}
-
-// ── STRATEGY: TikWM (TikTok specific) ──────────────────────
-async function tryTikwm(url) {
-  const apiUrl = `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`;
-  const res = await fetchWithTimeout(apiUrl, {}, 12000);
-  const data = await res.json();
-
-  if (data.code === 0 && data.data) {
-    const dlUrl = data.data.play || data.data.hdplay || data.data.wmplay;
-    if (dlUrl) {
-      return { downloadUrl: dlUrl, filename: 'tiktok_video.mp4' };
-    }
-    // Images (slideshow)
-    if (data.data.images && data.data.images.length > 0) {
-      return { downloadUrl: data.data.images[0], filename: 'tiktok_image.jpg' };
-    }
-  }
-  return null;
-}
-
-// ── STRATEGY: Twitter syndication API ───────────────────────
-async function tryTwitterSyndication(url) {
-  const tweetIdMatch = url.match(/status\/(\d+)/);
-  if (!tweetIdMatch) return null;
-
-  const tweetId = tweetIdMatch[1];
-  const syndicationUrl = `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&token=x`;
-
-  const res = await fetchWithTimeout(syndicationUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-    }
-  }, 10000);
-
-  const data = await res.json();
-
-  // Look for video in mediaDetails
-  if (data.mediaDetails && data.mediaDetails.length > 0) {
-    for (const media of data.mediaDetails) {
-      if (media.video_info && media.video_info.variants) {
-        // Get highest quality mp4
-        const mp4s = media.video_info.variants
-          .filter(v => v.content_type === 'video/mp4')
-          .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-
-        if (mp4s.length > 0) {
-          return { downloadUrl: mp4s[0].url, filename: `twitter_${tweetId}.mp4` };
-        }
-      }
-      // Image
-      if (media.media_url_https) {
-        return { downloadUrl: media.media_url_https, filename: `twitter_${tweetId}.jpg` };
-      }
-    }
-  }
-
-  // Look for photos
-  if (data.photos && data.photos.length > 0) {
-    return { downloadUrl: data.photos[0].url, filename: `twitter_${tweetId}.jpg` };
-  }
-
-  return null;
-}
-
-// ── STRATEGY: Generic OG video tag extraction ───────────────
-async function tryOgVideo(url) {
-  const res = await fetchWithTimeout(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'text/html'
-    },
-    redirect: 'follow'
-  }, 12000);
-
-  const html = await res.text();
-
-  // Look for video URLs in meta tags
-  const videoPatterns = [
-    /property="og:video:secure_url"\s+content="([^"]+)"/,
-    /property="og:video"\s+content="([^"]+)"/,
-    /content="([^"]+)"\s+property="og:video:secure_url"/,
-    /content="([^"]+)"\s+property="og:video"/,
-    /name="twitter:player:stream"\s+content="([^"]+)"/,
-    /content="([^"]+)"\s+name="twitter:player:stream"/,
-    /"contentUrl"\s*:\s*"([^"]+\.mp4[^"]*)"/,
-    /"videoUrl"\s*:\s*"([^"]+\.mp4[^"]*)"/
-  ];
-
-  for (const pattern of videoPatterns) {
-    const m = html.match(pattern);
-    if (m && m[1]) {
-      let videoUrl = m[1].replace(/\\u0026/g, '&').replace(/&amp;/g, '&');
-      if (videoUrl.startsWith('http') && !videoUrl.includes('embed')) {
-        return { downloadUrl: videoUrl, filename: 'video.mp4' };
-      }
-    }
-  }
-
-  // Look for image as fallback
-  const imgPatterns = [
-    /property="og:image"\s+content="([^"]+)"/,
-    /content="([^"]+)"\s+property="og:image"/
-  ];
-
-  for (const pattern of imgPatterns) {
-    const m = html.match(pattern);
-    if (m && m[1] && m[1].startsWith('http')) {
-      return { downloadUrl: m[1].replace(/&amp;/g, '&'), filename: 'image.jpg', type: 'image' };
-    }
-  }
-
-  return null;
-}
-
-// ── HELPER: fetch with timeout ──────────────────────────────
-async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+  const apiUrl = `https://api.microlink.io?url=${encodeURIComponent(url)}&video=true`;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const timeout = setTimeout(() => controller.abort(), 15000);
 
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    const res = await fetch(apiUrl, { signal: controller.signal });
+    const data = await res.json();
+
+    if (data.status === 'success' && data.data && data.data.video && data.data.video.url) {
+      return { downloadUrl: data.data.video.url, filename: null };
+    }
   } finally {
     clearTimeout(timeout);
   }
+  return null;
+}
+
+async function tryTwitter(url) {
+  const match = url.match(/status\/(\d+)/);
+  if (!match) return null;
+
+  const tweetId = match[1];
+  // Try multiple syndication endpoints
+  const endpoints = [
+    `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en&token=x`,
+    `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&token=a`
+  ];
+
+  for (const endpoint of endpoints) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+
+      const res = await fetch(endpoint, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+        signal: controller.signal
+      });
+      clearTimeout(timeout);
+
+      const text = await res.text();
+      if (!text || text.startsWith('<!')) continue;
+
+      const data = JSON.parse(text);
+
+      if (data.mediaDetails) {
+        for (const media of data.mediaDetails) {
+          if (media.video_info && media.video_info.variants) {
+            const mp4s = media.video_info.variants
+              .filter(v => v.content_type === 'video/mp4')
+              .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+            if (mp4s.length > 0) {
+              return { downloadUrl: mp4s[0].url, filename: `twitter_${tweetId}.mp4` };
+            }
+          }
+        }
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function tryOgVideo(url) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+        'Accept': 'text/html'
+      },
+      redirect: 'follow',
+      signal: controller.signal
+    });
+
+    const html = await res.text();
+
+    // Look for video in meta tags
+    const patterns = [
+      /property="og:video:secure_url"\s+content="([^"]+)"/,
+      /content="([^"]+)"\s+property="og:video:secure_url"/,
+      /property="og:video"\s+content="([^"]+)"/,
+      /content="([^"]+)"\s+property="og:video"/,
+      /name="twitter:player:stream"\s+content="([^"]+)"/
+    ];
+
+    for (const pattern of patterns) {
+      const m = html.match(pattern);
+      if (m && m[1] && m[1].startsWith('http') && (m[1].includes('.mp4') || m[1].includes('video'))) {
+        return { downloadUrl: m[1].replace(/&amp;/g, '&'), filename: 'video.mp4' };
+      }
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+  return null;
 }
