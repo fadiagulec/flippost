@@ -3,6 +3,10 @@
   command = ""
   functions = "netlify/functions"
 
+[functions]
+  node_bundler = "esbuild"
+
+# Existing redirects
 [[redirects]]
   from = "/landing"
   to = "/flipit-landing-page.html"
@@ -11,4 +15,20 @@
 [[redirects]]
   from = "/thanks"
   to = "/thank-you.html"
+  status = 200
+
+# API redirects to Netlify Functions
+[[redirects]]
+  from = "/api/generate"
+  to = "/.netlify/functions/generate"
+  status = 200
+
+[[redirects]]
+  from = "/api/extract-and-twist"
+  to = "/.netlify/functions/extract-and-twist"
+  status = 200
+
+[[redirects]]
+  from = "/api/download"
+  to = "/.netlify/functions/download"
   status = 200

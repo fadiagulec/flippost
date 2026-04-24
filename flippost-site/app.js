@@ -1,5 +1,5 @@
-// Backend URLs — all endpoints are now Netlify Functions (no external Railway dependency).
-const EXTRACT_URL = '/.netlify/functions/extract-and-twist';
+// Backend URL — uses Netlify Functions (same domain, no CORS issues)
+const BACKEND_URL = '/api';
 
 // Platform detection patterns
 const platformPatterns = {
@@ -13,13 +13,13 @@ const platformPatterns = {
 };
 
 const platformEmojis = {
-    instagram: '\u{1F4F7}',
-    tiktok: '\u{1F3B5}',
-    youtube: '\u25B6\uFE0F',
-    linkedin: '\u{1F4BC}',
-    facebook: '\u{1F4F5}',
-    x: '\u{1F426}',
-    threads: '\u{1F9F5}'
+    instagram: '📷',
+    tiktok: '🎵',
+    youtube: '▶️',
+    linkedin: '💼',
+    facebook: '👥',
+    x: '𝕏',
+    threads: '🧵'
 };
 
 // Initialize tab navigation
@@ -79,87 +79,75 @@ document.getElementById('urlInput').addEventListener('input', (e) => {
     }
 });
 
-// ── DOWNLOAD MEDIA ──────────────────────────────────────
-const DOWNLOAD_URL = '/.netlify/functions/download';
-
+// ── DOWNLOAD ──────────────────────────────────────────────
 document.getElementById('downloadBtn').addEventListener('click', handleDownload);
 
 async function handleDownload() {
-    const urlInput = document.getElementById('urlInput');
-    const url = urlInput.value.trim();
-    if (!url) { showError('Please enter a URL first', 'errorMessage'); return; }
+    const url = document.getElementById('urlInput').value.trim();
+    if (!url) { showError('Please enter a URL', 'errorMessage'); return; }
 
     const platform = detectPlatform(url);
-    const btn = document.getElementById('downloadBtn');
-    const origText = btn.textContent;
+    if (!platform) { showError('URL not recognized.', 'errorMessage'); return; }
 
+    // LinkedIn download warning
+    if (platform === 'linkedin') {
+        showError('LinkedIn posts cannot be downloaded directly due to LinkedIn restrictions. Try using Extract & Flip instead to get the text content.', 'errorMessage');
+        return;
+    }
+
+    const btn = document.getElementById('downloadBtn');
+    const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '\u23F3 Finding download link...';
+    btn.textContent = '⏳ Downloading...';
 
     try {
-        const res = await fetch(DOWNLOAD_URL, {
+        const res = await fetch(`${BACKEND_URL}/download`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
         });
 
+        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Download failed'); }
+
         const data = await res.json();
 
-        if (res.ok && data.downloadUrl) {
-            btn.textContent = '\u2B07\uFE0F Starting download...';
-
-            // If carousel with multiple images, show download panel
-            if (data.carousel && data.carousel.length > 1) {
-                window._lastCarouselCount = data.carousel.length;
-                window._lastCarouselUrls = data.carousel.map(item => item.url);
-                showCarouselDownloads(data.carousel, data.platform);
-                showSuccess(`\u{1F3A0} Found ${data.carousel.length} media items! Click each to download.`, 'errorMessage');
-            } else {
-                window._lastCarouselCount = 0;
-                window._lastCarouselUrls = [data.downloadUrl];
-                window.open(data.downloadUrl, '_blank');
-                const mediaType = data.type === 'image' ? '\u{1F5BC}\uFE0F Image' : '\u{1F3AC} Video';
-                showSuccess(`\u2705 ${mediaType} download started!`, 'errorMessage');
-            }
-        } else if (res.ok && data.openUrl) {
-            window.open(data.openUrl, '_blank');
-            showSuccess(`\u{1F4F1} ${data.instruction || 'Save the media from the app directly.'}`, 'errorMessage');
+        if (data.items && Array.isArray(data.items)) {
+            data.items.forEach((item, idx) => triggerDownload(item, `${platform}-item-${idx}`));
+        } else if (data.video) {
+            downloadBase64(data.video, `${platform}-video.mp4`, 'video/mp4');
+        } else if (data.image) {
+            downloadBase64(data.image, `${platform}-image.jpg`, 'image/jpeg');
         } else {
-            showError(`\u274C Could not process this link. Please try again.`, 'errorMessage');
+            throw new Error('No downloadable content found');
         }
+
+        showSuccess('✅ Download started!', 'errorMessage');
     } catch (err) {
-        console.error('Download error:', err);
-        showError('\u274C Network error. Please try again.', 'errorMessage');
+        showError(`Download error: ${err.message}`, 'errorMessage');
     } finally {
         btn.disabled = false;
-        btn.textContent = origText;
+        btn.textContent = orig;
     }
 }
 
-function showCarouselDownloads(items, platform) {
-    const container = document.getElementById('resultsContainer');
-
-    // Download All button
-    const downloadAllBtn = `<button onclick="document.querySelectorAll('.carousel-dl-link').forEach((a,i)=>{setTimeout(()=>window.open(a.href,'_blank'),i*800)})" style="display:inline-flex;align-items:center;gap:8px;padding:14px 24px;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer;margin-bottom:12px;width:100%;justify-content:center;">\u2B07\uFE0F Download All ${items.length} Items</button>`;
-
-    // Individual buttons
-    const individualBtns = items.map((item, i) => {
-        const icon = item.type === 'video' ? '\u{1F3AC}' : '\u{1F5BC}\uFE0F';
-        const label = item.type === 'video' ? 'Video' : 'Image';
-        return `<a href="${item.url}" target="_blank" rel="noopener" class="carousel-dl-link" style="display:inline-flex;align-items:center;gap:8px;padding:12px 20px;background:#fff;color:#0d6e66;border:2px solid #0d6e66;border-radius:10px;text-decoration:none;font-weight:700;font-size:15px;transition:all 0.2s;flex:1;min-width:120px;justify-content:center;" onmouseover="this.style.background='#0d6e66';this.style.color='#fff'" onmouseout="this.style.background='#fff';this.style.color='#0d6e66'">${icon} ${label} ${i + 1}</a>`;
-    }).join('');
-
-    const section = document.createElement('div');
-    section.className = 'result-section';
-    section.innerHTML = `
-        <h3>\u{1F3A0} Carousel — ${items.length} items found</h3>
-        ${downloadAllBtn}
-        <div style="display:flex;flex-wrap:wrap;gap:10px;">${individualBtns}</div>
-    `;
-    container.prepend(section);
+function triggerDownload(item, filename) {
+    if (item.video) downloadBase64(item.video, `${filename}.mp4`, 'video/mp4');
+    else if (item.image) downloadBase64(item.image, `${filename}.jpg`, 'image/jpeg');
 }
 
-// ── EXTRACT & FLIP ───────────────────────────────────────
+function downloadBase64(base64Data, filename, mimeType = 'application/octet-stream') {
+    try {
+        const bytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename;
+        document.body.appendChild(a); a.click();
+        document.body.removeChild(a); URL.revokeObjectURL(url);
+    } catch (e) { console.error('Download error:', e); }
+}
+
+// ── EXTRACT & FLIP ────────────────────────────────────────
 document.getElementById('extractBtn').addEventListener('click', handleExtractAndTwist);
 
 async function handleExtractAndTwist() {
@@ -172,45 +160,25 @@ async function handleExtractAndTwist() {
     const btn = document.getElementById('extractBtn');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '\u23F3 Extracting & Flipping...';
+    btn.textContent = '⏳ Extracting & Flipping...';
 
     const container = document.getElementById('resultsContainer');
-    container.innerHTML = '<div class="loading">\u{1F504} Processing your content, please wait...</div>';
+    container.innerHTML = '<div class="loading">🔄 Processing your content, please wait...</div>';
 
     try {
-        const res = await fetch(EXTRACT_URL, {
+        const res = await fetch(`${BACKEND_URL}/extract-and-twist`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ url })
         });
 
-        if (!res.ok) {
-            let msg = 'Extraction failed';
-            try { const e = await res.json(); msg = e.error || msg; } catch (_) {}
-            throw new Error(msg);
-        }
+        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Extraction failed'); }
 
         const data = await res.json();
-
-        // Handle graceful fallback when caption extraction failed
-        if (data.success === false) {
-            container.innerHTML = `
-                <div class="result-section" style="border-left:4px solid #ff6b00;padding:16px;">
-                    <h3>\u26A0\uFE0F Could Not Extract Caption</h3>
-                    <p class="result-text">${escapeHtml(data.message || 'The caption could not be extracted from this post.')}</p>
-                    <p style="margin-top:12px;color:#888;font-size:13px;">Tip: Copy the caption text from the post and paste it into the <strong>Script Rewrite</strong> tab for instant flipping.</p>
-                </div>`;
-            return;
-        }
-
         displayResults(data, platform);
     } catch (err) {
-        container.innerHTML = `
-            <div class="result-section" style="border-left:4px solid #ff4444;padding:16px;">
-                <h3>\u26A0\uFE0F Something went wrong</h3>
-                <p class="result-text">${escapeHtml(err.message)}</p>
-            </div>`;
         showError(`Error: ${err.message}`, 'errorMessage');
+        container.innerHTML = '';
     } finally {
         btn.disabled = false;
         btn.textContent = orig;
@@ -225,7 +193,7 @@ function displayResults(data, platform) {
     if (data.carousel_images && data.carousel_images.length > 0) {
         const wrap = document.createElement('div');
         wrap.className = 'carousel-preview';
-        wrap.innerHTML = '<h3>\u{1F5BC} Carousel Images</h3>';
+        wrap.innerHTML = '<h3>📸 Carousel Images</h3>';
         data.carousel_images.forEach((img, i) => {
             const div = document.createElement('div');
             div.className = 'carousel-image-wrapper';
@@ -241,15 +209,8 @@ function displayResults(data, platform) {
     const isCaption = data.original && !data.original.includes('\n') && data.original.length < 500;
 
     appendSection(container, isCaption ? 'Original Caption' : 'Original Transcript', data.original, false);
-    appendSection(container, '\u2728 Flipped Version', data.twisted, true);
-    if (data.prompt) appendSection(container, '\u{1F3AF} Proven Hook', data.prompt, true);
-
-    // Prompt buttons row: Video + Image
-    if (data.twisted) {
-        // Pass carousel count if we downloaded carousel items earlier
-        const carouselCount = window._lastCarouselCount || 0;
-        appendPromptButtons(container, data.twisted, data.original, platform, carouselCount);
-    }
+    appendSection(container, '✨ Flipped Version', data.twisted, true);
+    if (data.prompt) appendSection(container, '🎯 Proven Hook', data.prompt, true);
 }
 
 function appendSection(container, title, text, copyable) {
@@ -259,347 +220,14 @@ function appendSection(container, title, text, copyable) {
     if (copyable) {
         const btn = document.createElement('button');
         btn.className = 'copy-btn';
-        btn.textContent = '\u{1F4CB} Copy';
+        btn.textContent = '📋 Copy';
         btn.onclick = () => copyToClipboard(btn);
         div.appendChild(btn);
     }
     container.appendChild(div);
 }
 
-// ── VIDEO CREATION PROMPT ────────────────────────────────
-// Build a ready-to-paste prompt for AI video tools (Runway, Pika, Kling, Sora, etc.)
-// based on the flipped script content.
-function buildVideoPrompt(flippedScript, platform) {
-    const script = (flippedScript || '').trim();
-
-    // Take the first sentence as the hook seed.
-    const firstSentence = (script.split(/(?<=[.!?])\s+/)[0] || script).slice(0, 160);
-
-    // Heuristic style picks based on the script content.
-    const lower = script.toLowerCase();
-    let style;
-    if (/story|happened|i was|when i|last week|yesterday/.test(lower)) {
-        style = 'Cinematic talking-head with dynamic b-roll cutaways. Shallow depth of field, warm tones, handheld energy.';
-    } else if (/tip|step|how to|here.s how|hack|secret/.test(lower)) {
-        style = 'Fast-cut tutorial style. Clean overhead and over-the-shoulder shots, on-screen text overlays, modern minimal aesthetic.';
-    } else if (/data|study|number|research|stats|%/.test(lower)) {
-        style = 'Data-driven motion graphics mixed with sleek b-roll. Cool color palette, kinetic typography, documentary feel.';
-    } else {
-        style = 'Cinematic vertical 9:16 with high-contrast lighting. Mix of talking-head and b-roll, modern Reel/TikTok pacing.';
-    }
-
-    // Pick a sensible scene description.
-    const scene = `A creator delivers the message below in a visually engaging vertical 9:16 format optimised for ${platform || 'social media'}. Camera moves with subtle motion, environment matches the topic, and supporting b-roll reinforces every key beat.`;
-
-    // Hook: dramatic opening visual.
-    const hook = `Open on an arresting visual that physicalises this line: "${firstSentence}". Use a fast push-in or whip-pan, big bold on-screen text, and a sound design hit on frame 1 to stop the scroll.`;
-
-    // CTA visual.
-    const cta = `End on the creator looking straight into camera with bold animated text: "Follow for more" plus a thumb-stopping freeze frame. Hold 1.5s for the loop.`;
-
-    return [
-        `[SCENE]: ${scene}`,
-        ``,
-        `[HOOK]: ${hook}`,
-        ``,
-        `[STYLE]: ${style}`,
-        ``,
-        `[VOICEOVER]: ${script}`,
-        ``,
-        `[CTA]: ${cta}`,
-        ``,
-        `Aspect ratio: 9:16. Duration: 15-45 seconds. Pacing: fast cuts every 1-2 seconds. Audio: trending upbeat bed + clear VO mix. Subtitles: burned-in, large, high-contrast.`
-    ].join('\n');
-}
-
-// ── PROMPT BUTTONS (Video + Image) ──────────────────────
-function appendPromptButtons(container, flippedScript, originalCaption, platform, carouselCount) {
-    const btnRow = document.createElement('div');
-    btnRow.style.cssText = 'margin-top:16px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;';
-
-    // Video Prompt button
-    const videoBtn = document.createElement('button');
-    videoBtn.className = 'btn-primary';
-    videoBtn.style.cssText = 'background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;width:auto;padding:14px 28px;font-weight:700;letter-spacing:1px;border:none;border-radius:10px;cursor:pointer;font-size:16px;flex:1;min-width:180px;';
-    videoBtn.textContent = '\u{1F3AC} VIDEO PROMPT';
-    btnRow.appendChild(videoBtn);
-
-    // Image Prompt button
-    const imageBtn = document.createElement('button');
-    imageBtn.className = 'btn-secondary';
-    imageBtn.style.cssText = 'background:linear-gradient(135deg,#c2185b,#e8734a);color:#fff;width:auto;padding:14px 28px;font-weight:700;letter-spacing:1px;border:none;border-radius:10px;cursor:pointer;font-size:16px;flex:1;min-width:180px;';
-    imageBtn.textContent = '\u{1F5BC}\uFE0F IMAGE PROMPT';
-    btnRow.appendChild(imageBtn);
-
-    container.appendChild(btnRow);
-
-    // Video Prompt click handler
-    videoBtn.addEventListener('click', () => {
-        const existing = container.querySelector('.video-prompt-section');
-        if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
-
-        const promptText = buildVideoPrompt(flippedScript, platform);
-        const div = document.createElement('div');
-        div.className = 'result-section video-prompt-section';
-        div.innerHTML = `
-            <h3>\u{1F3AC} Video Creation Prompt</h3>
-            <p style="color:#777;font-size:14px;margin-bottom:10px;">Paste into Runway, Pika, Kling, Sora, or any AI video tool.</p>
-            <p class="result-text" style="white-space:pre-wrap;">${escapeHtml(promptText)}</p>
-        `;
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'copy-btn';
-        copyBtn.style.cssText = 'background:#0d6e66;color:#fff;';
-        copyBtn.textContent = '\u{1F4CB} Copy Prompt';
-        copyBtn.onclick = () => copyToClipboard(copyBtn);
-        div.appendChild(copyBtn);
-        container.appendChild(div);
-        div.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-
-    // Image Prompt click handler — uses Claude Vision to analyze actual images
-    imageBtn.addEventListener('click', async () => {
-        const existing = container.querySelector('.image-prompt-section');
-        if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
-
-        const imageUrls = window._lastCarouselUrls || [];
-
-        // If we have actual image URLs, analyze them with AI
-        if (imageUrls.length > 0) {
-            imageBtn.disabled = true;
-            imageBtn.textContent = '\u23F3 Analyzing images...';
-
-            const div = document.createElement('div');
-            div.className = 'result-section image-prompt-section';
-            div.style.borderLeftColor = '#c2185b';
-            div.innerHTML = `
-                <h3>\u{1F5BC}\uFE0F AI Image Prompts — Analyzing ${imageUrls.length} image${imageUrls.length > 1 ? 's' : ''}...</h3>
-                <p style="color:#777;font-size:14px;margin-bottom:14px;">Claude Vision is analyzing each image to create recreation prompts for Midjourney, DALL-E, Ideogram, or Leonardo.</p>
-                <div id="imagePromptsContainer"><div class="loading">\u{1F50D} Analyzing images with AI vision...</div></div>
-            `;
-            container.appendChild(div);
-            div.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-            const promptsContainer = document.getElementById('imagePromptsContainer');
-            let completedCount = 0;
-            promptsContainer.innerHTML = '';
-
-            // Analyze each image
-            for (let i = 0; i < imageUrls.length; i++) {
-                const slideDiv = document.createElement('div');
-                slideDiv.style.cssText = 'margin-bottom:16px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;';
-                slideDiv.innerHTML = `
-                    <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;text-transform:uppercase;">\u{1F5BC}\uFE0F Image ${i + 1} of ${imageUrls.length}</p>
-                    <p class="result-text" style="margin-bottom:8px;color:#999;">\u23F3 Analyzing...</p>
-                `;
-                promptsContainer.appendChild(slideDiv);
-
-                try {
-                    const res = await fetch('/.netlify/functions/analyze-image', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ imageUrl: imageUrls[i], slideNumber: i + 1 })
-                    });
-                    const data = await res.json();
-
-                    if (res.ok && data.prompt) {
-                        slideDiv.innerHTML = `
-                            <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;text-transform:uppercase;">\u{1F5BC}\uFE0F Image ${i + 1} of ${imageUrls.length}</p>
-                            <p class="result-text" style="margin-bottom:8px;">${escapeHtml(data.prompt)}</p>
-                            <button class="copy-btn" style="background:#c2185b;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='\u2705 Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
-                        `;
-                    } else {
-                        slideDiv.querySelector('.result-text').textContent = '\u274C Could not analyze this image: ' + (data.error || 'Unknown error');
-                        slideDiv.querySelector('.result-text').style.color = '#c2185b';
-                    }
-                } catch (err) {
-                    slideDiv.querySelector('.result-text').textContent = '\u274C Error analyzing image: ' + err.message;
-                    slideDiv.querySelector('.result-text').style.color = '#c2185b';
-                }
-
-                completedCount++;
-                div.querySelector('h3').textContent = `\u{1F5BC}\uFE0F AI Image Prompts — ${completedCount}/${imageUrls.length} analyzed`;
-            }
-
-            div.querySelector('h3').textContent = `\u{1F5BC}\uFE0F AI Image Prompts — ${imageUrls.length} image${imageUrls.length > 1 ? 's' : ''} analyzed`;
-            imageBtn.disabled = false;
-            imageBtn.textContent = '\u{1F5BC}\uFE0F IMAGE PROMPT';
-
-        } else {
-            // No images downloaded — fall back to topic-based prompts
-            const prompts = buildImagePrompts(flippedScript, originalCaption, platform, carouselCount);
-            const div = document.createElement('div');
-            div.className = 'result-section image-prompt-section';
-            div.style.borderLeftColor = '#c2185b';
-
-            let html = '<h3>\u{1F5BC}\uFE0F Image Creation Prompts</h3>';
-            html += '<p style="color:#777;font-size:14px;margin-bottom:14px;">Download images first for AI-analyzed prompts, or use these topic-based prompts for Midjourney, DALL-E, Ideogram, or Leonardo.</p>';
-
-            prompts.forEach((p, i) => {
-                html += `
-                    <div style="margin-bottom:16px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;">
-                        <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;text-transform:uppercase;">${p.label}</p>
-                        <p class="result-text" style="margin-bottom:8px;">${escapeHtml(p.prompt)}</p>
-                        <button class="copy-btn" style="background:#c2185b;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='\u2705 Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
-                    </div>
-                `;
-            });
-
-            div.innerHTML = html;
-            container.appendChild(div);
-            div.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-    });
-}
-
-// ── HELPERS FOR PROMPT BUILDING ──────────────────────────
-function stripHashtags(text) {
-    return text.replace(/#\w+/g, '').replace(/\s+/g, ' ').trim();
-}
-
-function guessTopic(text) {
-    const firstSent = (text.split(/[.!?\n]/)[0] || text).trim();
-    const clean = firstSent.replace(/[\uD83C-\uDBFF\uDC00-\uDFFF]+/g, '').replace(/[^\w\s']/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
-    if (!clean) return 'this';
-    const stop = new Set(['i','you','we','they','he','she','it','the','a','an','my','your','our','their','this','that','and','or','but','so','if','to','of','in','on','at','by','for','with','as','is','am','are','was','were','be','been','have','has','had','do','does','did','will','would','should','could','may','might','can','just','really','very','im','ill','its','put','get','got','go','going','went','make','made','here','there','now','then','some','all','any','me','us','them','about','into','up','down','out','over','under','off','from','than','too','free','new','step','together']);
-    const words = clean.split(' ').filter(Boolean);
-    let best = [], cur = [];
-    for (const w of words) {
-        if (w.length > 2 && !stop.has(w)) { cur.push(w); if (cur.length > best.length) best = cur.slice(); }
-        else { cur = []; }
-        if (best.length >= 4) break;
-    }
-    return best.length ? best.slice(0, 4).join(' ') : (words.slice(0, 3).join(' ') || 'this');
-}
-
-// ── IMAGE PROMPT BUILDER ────────────────────────────────
-function buildImagePrompts(flippedScript, originalCaption, platform, carouselCount) {
-    const script = (flippedScript || '').trim();
-    const lower = script.toLowerCase();
-
-    // Detect content type for styling
-    let style, mood, setting;
-    if (/fitness|workout|gym|health|body|muscle/.test(lower)) {
-        style = 'fitness lifestyle photography'; mood = 'energetic, powerful, motivated'; setting = 'modern gym or outdoor fitness space, golden hour lighting';
-    } else if (/food|recipe|cook|kitchen|meal|eat/.test(lower)) {
-        style = 'professional food photography'; mood = 'warm, appetizing, cozy'; setting = 'rustic kitchen counter or marble table, soft natural window light';
-    } else if (/travel|trip|adventure|explore|beach|mountain/.test(lower)) {
-        style = 'travel photography'; mood = 'wanderlust, freedom, epic'; setting = 'breathtaking landscape, vibrant colors, cinematic composition';
-    } else if (/business|entrepreneur|startup|money|income|hustle/.test(lower)) {
-        style = 'professional business photography'; mood = 'confident, sleek, aspirational'; setting = 'modern workspace or luxury office, clean minimal aesthetic';
-    } else if (/beauty|skincare|makeup|glow|skin/.test(lower)) {
-        style = 'beauty editorial photography'; mood = 'glowing, elegant, fresh'; setting = 'soft diffused lighting, clean pastel background, dewy skin texture';
-    } else if (/fashion|outfit|style|wear|look/.test(lower)) {
-        style = 'fashion editorial photography'; mood = 'trendy, bold, curated'; setting = 'urban street or minimalist studio, dramatic lighting';
-    } else if (/mindset|motivation|success|growth|manifest/.test(lower)) {
-        style = 'inspirational lifestyle photography'; mood = 'calm, focused, powerful'; setting = 'minimalist space with warm tones, sunrise or golden hour light';
-    } else if (/tech|app|software|ai|digital|code/.test(lower)) {
-        style = 'tech product photography'; mood = 'futuristic, clean, innovative'; setting = 'dark sleek desk setup, neon accent lights, shallow depth of field';
-    } else if (/home|interior|decor|design|room|space/.test(lower)) {
-        style = 'interior design photography'; mood = 'warm, inviting, aesthetic'; setting = 'beautifully styled room, natural light through windows, earth tones';
-    } else {
-        style = 'social media content photography'; mood = 'engaging, authentic, scroll-stopping'; setting = 'aesthetically pleasing environment, natural lighting, warm tones';
-    }
-
-    const topic = guessTopic(stripHashtags(script));
-    const sentences = script.split(/(?<=[.!?])\s+|\n+/).map(s => s.trim()).filter(s => s.length > 5);
-
-    // Determine how many slides to generate
-    const slideCount = Math.max(carouselCount || 0, 6);
-
-    // Slide templates — each slide gets a unique angle/composition
-    const slideTemplates = [
-        {
-            label: '\u{1F4F8} Slide 1 — Hook / Cover',
-            build: () => `Dramatic, scroll-stopping ${style} image for a carousel cover about "${topic}". ${setting}. Bold composition with space for large text overlay at top. Subject centered, hero shot. Mood: ${mood}. Shot on Sony A7IV, 35mm f/1.4. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F4A1} Slide 2 — The Problem',
-            build: () => `${style} image showing the "problem" or "before" state related to "${topic}". ${setting}. Slightly desaturated or moody tones to convey frustration or confusion. Clean composition with text space on the right. 4:5 aspect ratio. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{2728} Slide 3 — Key Insight',
-            build: () => `Clean, bright ${style} image representing a key insight or "aha moment" about "${topic}". ${setting}. Overhead flat lay or close-up detail shot. Warm highlights, ${mood} mood. Minimalist composition with space for text overlay. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F4CA} Slide 4 — Data / Proof',
-            build: () => `Infographic-style ${style} image for a carousel slide about "${topic}". Light cream background (#faf8f5), teal (#0d6e66) and coral (#e8734a) accent colors. Left side: visual element. Right side: clean space for stats/text. Modern flat design, soft shadows. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F527} Slide 5 — How-To / Steps',
-            build: () => `Step-by-step visual for "${topic}". ${style}, tutorial angle — overhead or over-the-shoulder. ${setting}. Show hands or tools in action. Clean numbered layout space. Mood: ${mood}. Bright, well-lit, instructional feel. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F525} Slide 6 — Result / Transformation',
-            build: () => `Aspirational "after" or result image for "${topic}". ${style}. ${setting}. Vibrant, high-contrast, ${mood} mood. Subject looks confident/successful. Golden hour lighting, cinematic depth of field. Space for bold CTA text at bottom. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F3AF} Slide 7 — CTA / Save This',
-            build: () => `Bold call-to-action slide design for "${topic}". Solid gradient background (teal #0d6e66 to coral #e8734a). Clean center space for large CTA text like "Save This" or "Follow for More". Minimal, modern, high contrast. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F4F1} Slide 8 — Behind the Scenes',
-            build: () => `Authentic behind-the-scenes ${style} image related to "${topic}". ${setting}. Candid, raw, slightly imperfect. Natural light, shallow depth of field. Shows the real process. Mood: genuine, relatable. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F30D} Slide 9 — Lifestyle Context',
-            build: () => `Wide lifestyle ${style} shot showing "${topic}" in a real-world context. ${setting}. Environmental portrait or establishing shot. Cinematic composition, leading lines. ${mood} mood. --ar 4:5 --style raw --v 6.1`
-        },
-        {
-            label: '\u{1F48E} Slide 10 — Premium Detail',
-            build: () => `Ultra close-up macro ${style} shot highlighting a premium detail related to "${topic}". ${setting}. Shallow depth of field, bokeh background. Texture-rich, ${mood} mood. Editorial quality. --ar 4:5 --style raw --v 6.1`
-        }
-    ];
-
-    // Generate prompts for the exact number of slides
-    const prompts = [];
-    for (let i = 0; i < slideCount && i < slideTemplates.length; i++) {
-        prompts.push({
-            label: slideTemplates[i].label,
-            prompt: slideTemplates[i].build()
-        });
-    }
-
-    return prompts;
-}
-
-function appendVideoPromptSection(container, flippedScript, platform) {
-    // Kept for Script Rewrite tab which still calls this directly
-    const triggerWrap = document.createElement('div');
-    triggerWrap.style.cssText = 'margin-top:16px;display:flex;gap:12px;justify-content:center;flex-wrap:wrap;';
-
-    const triggerBtn = document.createElement('button');
-    triggerBtn.className = 'btn-primary';
-    triggerBtn.style.cssText = 'background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;width:auto;padding:14px 28px;font-weight:700;letter-spacing:1px;border:none;border-radius:10px;cursor:pointer;font-size:16px;';
-    triggerBtn.textContent = '\u{1F3AC} VIDEO PROMPT';
-    triggerWrap.appendChild(triggerBtn);
-    container.appendChild(triggerWrap);
-
-    triggerBtn.addEventListener('click', () => {
-        const existing = container.querySelector('.video-prompt-section');
-        if (existing) { existing.style.display = existing.style.display === 'none' ? '' : 'none'; return; }
-
-        const promptText = buildVideoPrompt(flippedScript, platform);
-        const div = document.createElement('div');
-        div.className = 'result-section video-prompt-section';
-        div.innerHTML = `
-            <h3>\u{1F3AC} Video Creation Prompt</h3>
-            <p style="color:#777;font-size:14px;margin-bottom:10px;">Paste into Runway, Pika, Kling, Sora, or any AI video tool.</p>
-            <p class="result-text" style="white-space:pre-wrap;">${escapeHtml(promptText)}</p>
-        `;
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'copy-btn';
-        copyBtn.style.cssText = 'background:#0d6e66;color:#fff;';
-        copyBtn.textContent = '\u{1F4CB} Copy Prompt';
-        copyBtn.onclick = () => copyToClipboard(copyBtn);
-        div.appendChild(copyBtn);
-        container.appendChild(div);
-        div.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
-}
-
-// ── SCRIPT REWRITE ───────────────────────────────────────
-const REWRITE_URL = '/.netlify/functions/rewrite-script';
-
+// ── SCRIPT REWRITE ─────────────────────────────────────────
 document.getElementById('rewriteBtn').addEventListener('click', handleRewriteScript);
 
 async function handleRewriteScript() {
@@ -609,16 +237,16 @@ async function handleRewriteScript() {
     const btn = document.getElementById('rewriteBtn');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '\u23F3 Rewriting...';
+    btn.textContent = '⏳ Rewriting...';
 
     const container = document.getElementById('scriptResultsContainer');
-    container.innerHTML = '<div class="loading">\u2728 Creating your flipped version...</div>';
+    container.innerHTML = '<div class="loading">✨ Creating your flipped version...</div>';
 
     try {
-        const res = await fetch(REWRITE_URL, {
+        const res = await fetch(`${BACKEND_URL}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ script, tone: 'viral', platform: null })
+            body: JSON.stringify({ script })
         });
 
         if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Rewrite failed'); }
@@ -626,14 +254,8 @@ async function handleRewriteScript() {
         const data = await res.json();
         container.innerHTML = '';
         appendSection(container, 'Original Script', script, false);
-        appendSection(container, '\u2728 Flipped Version', data.rewritten, true);
-        if (data.hook) appendSection(container, '\u{1F3AF} Proven Hook', data.hook, true);
-        if (data.cta) appendSection(container, '\u{1F4E3} Call to Action', data.cta, true);
-
-        // Video + Image prompts
-        if (data.rewritten) {
-            appendPromptButtons(container, data.rewritten, script, null);
-        }
+        appendSection(container, '✨ Flipped Version', data.twisted, true);
+        if (data.prompt) appendSection(container, '🎯 Proven Hook', data.prompt, true);
     } catch (err) {
         showError(`Error: ${err.message}`, 'scriptErrorMessage');
         container.innerHTML = '';
@@ -643,9 +265,7 @@ async function handleRewriteScript() {
     }
 }
 
-// ── NICHE IDEAS ──────────────────────────────────────────
-const NICHE_IDEAS_URL = '/.netlify/functions/niche-ideas';
-
+// ── NICHE IDEAS ─────────────────────────────────────────────
 document.getElementById('generateIdeasBtn').addEventListener('click', handleGenerateIdeas);
 
 async function handleGenerateIdeas() {
@@ -656,24 +276,37 @@ async function handleGenerateIdeas() {
     const btn = document.getElementById('generateIdeasBtn');
     const orig = btn.textContent;
     btn.disabled = true;
-    btn.textContent = '\u23F3 Generating...';
+    btn.textContent = '⏳ Generating...';
 
     const container = document.getElementById('ideasResultsContainer');
-    container.innerHTML = '<div class="loading">\u{1F680} Creating viral script ideas...</div>';
+    container.innerHTML = '<div class="loading">🚀 Creating viral script ideas...</div>';
 
     try {
-        const res = await fetch(NICHE_IDEAS_URL, {
+        const res = await fetch(`${BACKEND_URL}/generate`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ niche, description })
+            body: JSON.stringify({
+                script: `You are a viral content strategist. Generate 3 highly specific, ready-to-film viral video script ideas for the niche: ${niche}
+
+Topic/Details: ${description}
+
+For EACH of the 3 ideas, provide:
+1. VIDEO TITLE — a scroll-stopping, curiosity-driven title
+2. HOOK — the exact first 1-2 sentences to say on camera that stops the scroll
+3. SCRIPT OUTLINE — 5-6 bullet points covering what to say, in order
+4. CALL TO ACTION — what to tell viewers at the end
+5. WHY IT WORKS — 1 sentence explaining the psychology behind why this will go viral
+
+Number each idea clearly (1, 2, 3). Make them specific and actionable — not generic. Mix formats: one educational, one storytelling, one trend/controversial take.`
+            })
         });
 
         if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Generation failed'); }
 
         const data = await res.json();
         container.innerHTML = '';
-        appendSection(container, '\u{1F4A1} Your Viral Content Ideas', data.twisted, true);
-        if (data.prompt) appendSection(container, '\u{1F3AF} Pro Tips', data.prompt, true);
+        appendSection(container, '💡 Your 3 Viral Script Ideas', data.twisted, true);
+        if (data.prompt) appendSection(container, '🎯 Pro Tips', data.prompt, true);
     } catch (err) {
         showError(`Error: ${err.message}`, 'ideasErrorMessage');
         container.innerHTML = '';
@@ -683,16 +316,119 @@ async function handleGenerateIdeas() {
     }
 }
 
-// ── UTILITIES ────────────────────────────────────────────
+// ── IMAGE PROMPTS ──────────────────────────────────────────
+var selectedImgNiche = 'mommy';
+var selectedEvent = '';
+
+// Niche card selection
+document.querySelectorAll('.niche-card').forEach(card => {
+    card.addEventListener('click', () => {
+        document.querySelectorAll('.niche-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        selectedImgNiche = card.getAttribute('data-niche');
+    });
+});
+
+// Event pill selection
+document.querySelectorAll('.event-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+        if (pill.classList.contains('selected')) {
+            pill.classList.remove('selected');
+            selectedEvent = '';
+        } else {
+            document.querySelectorAll('.event-pill').forEach(p => p.classList.remove('selected'));
+            pill.classList.add('selected');
+            selectedEvent = pill.getAttribute('data-event');
+            document.getElementById('imgCustomEvent').value = '';
+        }
+    });
+});
+
+// Custom event clears pills
+document.getElementById('imgCustomEvent').addEventListener('input', function() {
+    if (this.value.trim()) {
+        document.querySelectorAll('.event-pill').forEach(p => p.classList.remove('selected'));
+        selectedEvent = '';
+    }
+});
+
+const nicheDescriptions = {
+    mommy: 'mommy influencer / mom life — daily routines, kids activities, parenting moments, mom fashion, family outings, nursery setups, school runs, playdates, baby milestones',
+    home: 'home & interior — home decor, room makeovers, organized spaces, cozy corners, kitchen setups, living room aesthetics, DIY decor, seasonal decorating',
+    food: 'food influencer — recipe prep, plated dishes, kitchen moments, grocery hauls, meal prep, restaurant visits, baking, cooking aesthetics, table settings',
+    fashion: 'fashion influencer — outfit of the day, styling tips, wardrobe organization, shopping hauls, street style, accessories, seasonal fashion, trend showcases',
+    lifestyle: 'lifestyle influencer — daily routines, self-care, journaling, coffee moments, aesthetic flat lays, productivity setups, wellness rituals, day-in-my-life',
+    beauty: 'beauty influencer — makeup looks, skincare routines, product flat lays, vanity setups, before/after transformations, GRWM moments, beauty hauls',
+    travel: 'travel influencer — destinations, hotel rooms, beach scenes, cityscapes, airport outfits, luggage flat lays, local food, scenic viewpoints',
+    fitness: 'fitness influencer — workout outfits, gym setups, healthy meals, progress photos, workout poses, yoga moments, morning routines, active lifestyle'
+};
+
+document.getElementById('generateImgPromptsBtn').addEventListener('click', handleGenerateImgPrompts);
+
+async function handleGenerateImgPrompts() {
+    const nicheDesc = nicheDescriptions[selectedImgNiche] || selectedImgNiche;
+    const eventText = document.getElementById('imgCustomEvent').value.trim() || selectedEvent || '';
+    const style = document.getElementById('imgStyle').value;
+    const count = document.getElementById('imgCount').value;
+    const extra = document.getElementById('imgExtra').value.trim();
+
+    const btn = document.getElementById('generateImgPromptsBtn');
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⏳ Generating...';
+
+    const container = document.getElementById('imgResultsContainer');
+    container.innerHTML = '<div class="loading">📸 Creating your image prompts...</div>';
+
+    const prompt = `You are an expert AI image prompt engineer for social media influencers. Generate exactly ${count} detailed, high-quality image prompts.
+
+Influencer niche: ${nicheDesc}
+Image style: ${style}
+${eventText ? 'Event / vibe / theme: ' + eventText : ''}
+${extra ? 'Additional details: ' + extra : ''}
+
+Rules for each prompt:
+- Write each prompt as a detailed, ready-to-use AI image generation prompt (for Midjourney, DALL-E, or similar)
+- Include specific details: lighting (golden hour, soft natural light, studio), composition (close-up, wide shot, flat lay, overhead), colors, mood, styling details
+- Make prompts Instagram/Pinterest-worthy — aspirational, aesthetic, on-brand
+- Each prompt should be 2-4 sentences of vivid description
+- Number each prompt
+- After each prompt, add a one-line "CAPTION IDEA:" that pairs with the image
+- At the end, add a "POSTING TIPS" section with 3 tips for this niche
+
+Make each prompt unique — vary the setting, angle, mood, and composition.`;
+
+    try {
+        const res = await fetch(`${BACKEND_URL}/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ script: prompt })
+        });
+
+        if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Generation failed'); }
+
+        const data = await res.json();
+        container.innerHTML = '';
+
+        const nicheLabel = selectedImgNiche.charAt(0).toUpperCase() + selectedImgNiche.slice(1);
+        const title = `📸 ${nicheLabel} Image Prompts${eventText ? ' — ' + eventText : ''}`;
+        appendSection(container, title, data.twisted, true);
+        if (data.prompt) appendSection(container, '🎯 Posting Tips', data.prompt, true);
+    } catch (err) {
+        showError(`Error: ${err.message}`, 'imgErrorMessage');
+        container.innerHTML = '';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+    }
+}
+
+// ── UTILITIES ───────────────────────────────────────────────
 function copyToClipboard(button) {
-    // Find the result-text element within the same parent (works regardless
-    // of where the copy button is positioned within the section).
-    const parent = button.parentElement;
-    const target = parent.querySelector('.result-text') || button.previousElementSibling;
-    const text = target ? target.textContent : '';
+    const text = button.previousElementSibling.textContent;
     navigator.clipboard.writeText(text).then(() => {
         const orig = button.textContent;
-        button.textContent = '\u2705 Copied!';
+        button.textContent = '✅ Copied!';
         setTimeout(() => { button.textContent = orig; }, 2000);
     });
 }
@@ -715,6 +451,6 @@ function showSuccess(msg, id) {
     const el = document.getElementById(id);
     el.textContent = msg;
     el.style.display = 'block';
-    el.style.color = '#4ade80';
+    el.style.color = '#0d6e66';
     setTimeout(() => { el.style.display = 'none'; }, 3000);
 }
