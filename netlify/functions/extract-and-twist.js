@@ -93,9 +93,25 @@ exports.handler = async function(event) {
 
       const html = await fetchResp.text();
 
-      // Extract text from HTML
-      originalText = html
-        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+      // First, try to extract meta tags (og:description, og:title, description)
+      // These often contain the actual caption/content, especially for social platforms
+      const metaParts = [];
+      const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']+)["']/i);
+      const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']+)["']/i);
+      const metaDesc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']+)["']/i);
+      const pageTitle = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+
+      if (ogTitle && ogTitle[1].length > 5) metaParts.push(ogTitle[1]);
+      if (ogDesc && ogDesc[1].length > 10) metaParts.push(ogDesc[1]);
+      if (metaDesc && metaDesc[1].length > 10 && (!ogDesc || metaDesc[1] !== ogDesc[1])) metaParts.push(metaDesc[1]);
+      if (pageTitle && pageTitle[1].length > 5 && (!ogTitle || pageTitle[1] !== ogTitle[1])) metaParts.push(pageTitle[1]);
+
+      // If we got good meta content (especially for social platforms), use that
+      if (metaParts.join(' ').length > 50) {
+        originalText = metaParts.join('\n\n');
+      } else {
+        // Fall back to full HTML text extraction
+        originalText = html        .replace(/<script[\s\S]*?<\/script>/gi, ' ')
         .replace(/<style[\s\S]*?<\/style>/gi, ' ')
         .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
         .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
@@ -110,6 +126,7 @@ exports.handler = async function(event) {
         .replace(/&nbsp;/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+      }
 
       if (originalText.length > 3000) {
         originalText = originalText.substring(0, 3000) + '...';
