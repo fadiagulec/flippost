@@ -6,20 +6,24 @@ const platformPatterns = {
     instagram: /instagram\.com|instagr\.am/i,
     tiktok: /tiktok\.com|vm\.tiktok|vt\.tiktok/i,
     youtube: /youtube\.com|youtu\.be/i,
+    vimeo: /vimeo\.com/i,
     linkedin: /linkedin\.com/i,
     facebook: /facebook\.com|fb\.watch/i,
     x: /twitter\.com|x\.com/,
-    threads: /threads\.net/i
+    threads: /threads\.net/i,
+    mp4: /\.mp4(\?|$)/i
 };
 
 const platformEmojis = {
     instagram: '📷',
     tiktok: '🎵',
     youtube: '▶️',
+    vimeo: '▶️',
     linkedin: '💼',
     facebook: '👥',
     x: '𝕏',
-    threads: '🧵'
+    threads: '🧵',
+    mp4: '🎬'
 };
 
 // Initialize tab navigation
@@ -116,6 +120,16 @@ function getEmbedHtml(url, platform) {
                 const encoded = encodeURIComponent(url);
                 return `<iframe src="https://www.facebook.com/plugins/video.php?href=${encoded}&show_text=false&width=476" width="100%" height="400" frameborder="0" allowfullscreen loading="lazy"></iframe>`;
             }
+            case 'vimeo': {
+                const match = url.match(/vimeo\.com\/(\d+)/);
+                if (match) {
+                    return `<iframe src="https://player.vimeo.com/video/${match[1]}?badge=0&autopause=0" width="100%" height="400" frameborder="0" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen loading="lazy"></iframe>`;
+                }
+                break;
+            }
+            case 'mp4': {
+                return `<video controls width="100%" style="max-height:500px; border-radius:8px;"><source src="${escapeHtml(url)}" type="video/mp4">Your browser does not support the video tag.</video>`;
+            }
         }
     } catch (e) {
         console.error('Embed generation error:', e);
@@ -136,16 +150,14 @@ function renderVideoEmbed(container, url, platform) {
     if (embedHtml) {
         wrapper.innerHTML = embedHtml;
 
-        // Add fallback: if iframe fails to load, show link
         const iframe = wrapper.querySelector('iframe');
         if (iframe) {
             iframe.onerror = function () {
                 wrapper.innerHTML = getFallbackHtml(url, platform);
             };
-            // Timeout fallback — if iframe is blank after 8s, show fallback
             setTimeout(() => {
                 try {
-                    if (!wrapper.querySelector('iframe')) {
+                    if (!wrapper.querySelector('iframe') && !wrapper.querySelector('video')) {
                         wrapper.innerHTML = getFallbackHtml(url, platform);
                     }
                 } catch (e) { /* ignore */ }
@@ -184,7 +196,6 @@ async function handleDownload() {
     const platform = detectPlatform(url);
     if (!platform) { showError('URL not recognized.', 'errorMessage'); return; }
 
-    // LinkedIn download warning
     if (platform === 'linkedin') {
         showError('LinkedIn posts cannot be downloaded directly due to LinkedIn restrictions. Try using Extract & Flip instead to get the text content.', 'errorMessage');
         return;
@@ -251,7 +262,10 @@ async function handleExtractAndTwist() {
     if (!url) { showError('Please enter a URL', 'errorMessage'); return; }
 
     const platform = detectPlatform(url);
-    if (!platform) { showError('URL not recognized.', 'errorMessage'); return; }
+    if (!platform) { showError('URL not recognized. Supported: Instagram, TikTok, YouTube, Vimeo, LinkedIn, Facebook, X, Threads, or direct .mp4 links.', 'errorMessage'); return; }
+
+    console.log('[FlipIt] Raw URL:', url);
+    console.log('[FlipIt] Detected platform:', platform);
 
     const btn = document.getElementById('extractBtn');
     const orig = btn.textContent;
@@ -259,25 +273,44 @@ async function handleExtractAndTwist() {
     btn.textContent = '⏳ Extracting & Flipping...';
 
     const container = document.getElementById('resultsContainer');
-    container.innerHTML = '<div class="loading">🔄 Processing your content, please wait...</div>';
+    container.innerHTML = '';
 
-    // Show video embed immediately while we wait for text extraction
+    // Show video embed FIRST — this works independently of the API
+    const embedHtml = getEmbedHtml(url, platform);
+    console.log('[FlipIt] Embed HTML generated:', !!embedHtml);
+    if (embedHtml) {
+        console.log('[FlipIt] Embed src:', embedHtml.match(/src="([^"]+)"/)?.[1] || 'N/A');
+    }
     renderVideoEmbed(container, url, platform);
 
+    // Add loading indicator AFTER the embed
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'loading';
+    loadingDiv.textContent = '🔄 Extracting text & flipping script...';
+    container.appendChild(loadingDiv);
+
+    // Fetch with a 20-second timeout so the page never hangs forever
     try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 20000);
+
         const res = await fetch(`${BACKEND_URL}/extract-and-twist`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
+            body: JSON.stringify({ url }),
+            signal: controller.signal
         });
+
+        clearTimeout(timeoutId);
+        console.log('[FlipIt] API response status:', res.status);
 
         if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Extraction failed'); }
 
         const data = await res.json();
+        console.log('[FlipIt] API data keys:', Object.keys(data).join(', '));
 
-        // Remove the loading indicator but keep the video embed
-        const loadingEl = container.querySelector('.loading');
-        if (loadingEl) loadingEl.remove();
+        // Remove the loading indicator
+        loadingDiv.remove();
 
         // Show warning if there is one
         if (data.warning) {
@@ -291,12 +324,28 @@ async function handleExtractAndTwist() {
         // Show extracted text and flipped version if available
         if (data.original || data.twisted) {
             displayResultsContent(container, data, platform);
+        } else if (!data.warning) {
+            const tipDiv = document.createElement('div');
+            tipDiv.className = 'result-section';
+            tipDiv.innerHTML = `<h3>💡 Tip</h3><p class="result-text">No text could be extracted. Copy the caption from the post above and use the <strong>Script Rewrite</strong> tab to flip it.</p>`;
+            container.appendChild(tipDiv);
         }
     } catch (err) {
-        console.error('Extract error:', err);
-        const loadingEl = container.querySelector('.loading');
-        if (loadingEl) loadingEl.remove();
-        showError('Something went wrong. Please try again.', 'errorMessage');
+        console.error('[FlipIt] Extract error:', err.message);
+        // Remove loading indicator
+        loadingDiv.remove();
+
+        // Show helpful message instead of just an error
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'result-section';
+        msgDiv.style.borderLeftColor = '#e8734a';
+
+        if (err.name === 'AbortError') {
+            msgDiv.innerHTML = `<h3 style="color:#e8734a;">⏱️ Request Timed Out</h3><p class="result-text" style="background:#fff8f0;">Text extraction took too long. You can still watch the video above — copy the caption and use the <strong>Script Rewrite</strong> tab to flip it.</p>`;
+        } else {
+            msgDiv.innerHTML = `<h3 style="color:#e8734a;">⚠️ Extraction Issue</h3><p class="result-text" style="background:#fff8f0;">Could not extract text from this URL. You can still watch the video above — copy the caption and use the <strong>Script Rewrite</strong> tab to flip it.</p>`;
+        }
+        container.appendChild(msgDiv);
     } finally {
         btn.disabled = false;
         btn.textContent = orig;
@@ -453,7 +502,6 @@ Number each idea clearly (1, 2, 3). Make them specific and actionable — not ge
 var selectedImgNiche = 'mommy';
 var selectedEvent = '';
 
-// Niche card selection
 document.querySelectorAll('.niche-card').forEach(card => {
     card.addEventListener('click', () => {
         document.querySelectorAll('.niche-card').forEach(c => c.classList.remove('selected'));
@@ -462,7 +510,6 @@ document.querySelectorAll('.niche-card').forEach(card => {
     });
 });
 
-// Event pill selection
 document.querySelectorAll('.event-pill').forEach(pill => {
     pill.addEventListener('click', () => {
         if (pill.classList.contains('selected')) {
@@ -477,7 +524,6 @@ document.querySelectorAll('.event-pill').forEach(pill => {
     });
 });
 
-// Custom event clears pills
 document.getElementById('imgCustomEvent').addEventListener('input', function() {
     if (this.value.trim()) {
         document.querySelectorAll('.event-pill').forEach(p => p.classList.remove('selected'));
