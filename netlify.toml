@@ -1,23 +1,11 @@
 [build]
-  publish = "flippost-site"
-  command = ""
+  publish = "."
   functions = "netlify/functions"
 
 [functions]
   node_bundler = "esbuild"
 
-# Existing redirects
-[[redirects]]
-  from = "/landing"
-  to = "/flipit-landing-page.html"
-  status = 200
-
-[[redirects]]
-  from = "/thanks"
-  to = "/thank-you.html"
-  status = 200
-
-# API redirects to Netlify Functions
+# Redirect API calls to Netlify Functions
 [[redirects]]
   from = "/api/generate"
   to = "/.netlify/functions/generate"
@@ -32,3 +20,15 @@
   from = "/api/download"
   to = "/.netlify/functions/download"
   status = 200
+
+# Security headers
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    X-XSS-Protection = "1; mode=block"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; frame-ancestors 'none'"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
