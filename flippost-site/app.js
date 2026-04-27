@@ -270,26 +270,134 @@ async function handleDownload() {
 function showCarouselDownloads(items, platform) {
     const container = document.getElementById('resultsContainer');
 
-    // Download All button — uses forceDownload for each item
-    const downloadAllBtn = `<button onclick="(async()=>{const btns=document.querySelectorAll('.carousel-dl-btn');for(let i=0;i<btns.length;i++){btns[i].textContent='\\u23F3...';await forceDownload(btns[i].dataset.url,btns[i].dataset.fname);btns[i].textContent='\\u2705 Done';await new Promise(r=>setTimeout(r,500))}})()" style="display:inline-flex;align-items:center;gap:8px;padding:14px 24px;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer;margin-bottom:12px;width:100%;justify-content:center;">\u2B07\uFE0F Download All ${items.length} Items</button>`;
+    const section = document.createElement('div');
+    section.className = 'result-section';
 
-    // Individual buttons — each triggers forceDownload
-    const individualBtns = items.map((item, i) => {
+    const heading = document.createElement('h3');
+    heading.textContent = `\u{1F3A0} Carousel — ${items.length} items found`;
+    section.appendChild(heading);
+
+    // Download All button — wired with addEventListener (CSP-safe)
+    const downloadAllBtn = document.createElement('button');
+    downloadAllBtn.textContent = `\u2B07\uFE0F Download All ${items.length} Items`;
+    downloadAllBtn.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:14px 24px;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer;margin-bottom:12px;width:100%;justify-content:center;';
+    section.appendChild(downloadAllBtn);
+
+    const grid = document.createElement('div');
+    grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;';
+    section.appendChild(grid);
+
+    const individualButtons = [];
+    items.forEach((item, i) => {
         const icon = item.type === 'video' ? '\u{1F3AC}' : '\u{1F5BC}\uFE0F';
         const label = item.type === 'video' ? 'Video' : 'Image';
         const ext = item.type === 'video' ? '.mp4' : '.jpg';
         const fname = `flipit-${platform || 'media'}-${i + 1}${ext}`;
-        return `<button class="carousel-dl-btn" data-url="${item.url}" data-fname="${fname}" onclick="forceDownload(this.dataset.url,this.dataset.fname).then(()=>{this.textContent='\\u2705 Done';setTimeout(()=>this.textContent='${icon} ${label} ${i + 1}',2000)})" style="display:inline-flex;align-items:center;gap:8px;padding:12px 20px;background:#fff;color:#0d6e66;border:2px solid #0d6e66;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer;transition:all 0.2s;flex:1;min-width:120px;justify-content:center;" onmouseover="this.style.background='#0d6e66';this.style.color='#fff'" onmouseout="this.style.background='#fff';this.style.color='#0d6e66'">${icon} ${label} ${i + 1}</button>`;
-    }).join('');
+        const baseLabel = `${icon} ${label} ${i + 1}`;
 
-    const section = document.createElement('div');
-    section.className = 'result-section';
-    section.innerHTML = `
-        <h3>\u{1F3A0} Carousel — ${items.length} items found</h3>
-        ${downloadAllBtn}
-        <div style="display:flex;flex-wrap:wrap;gap:10px;">${individualBtns}</div>
-    `;
+        const btn = document.createElement('button');
+        btn.className = 'carousel-dl-btn';
+        btn.textContent = baseLabel;
+        btn.dataset.url = item.url;
+        btn.dataset.fname = fname;
+        btn.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:12px 20px;background:#fff;color:#0d6e66;border:2px solid #0d6e66;border-radius:10px;font-weight:700;font-size:15px;cursor:pointer;transition:all 0.2s;flex:1;min-width:120px;justify-content:center;';
+        btn.addEventListener('mouseover', () => { btn.style.background = '#0d6e66'; btn.style.color = '#fff'; });
+        btn.addEventListener('mouseout', () => { btn.style.background = '#fff'; btn.style.color = '#0d6e66'; });
+        btn.addEventListener('click', () => {
+            forceDownload(item.url, fname).then(() => {
+                btn.textContent = '\u2705 Done';
+                setTimeout(() => { btn.textContent = baseLabel; }, 2000);
+            }).catch((err) => {
+                btn.textContent = '\u274C Failed';
+                btn.title = (err && err.message) || '';
+                setTimeout(() => { btn.textContent = baseLabel; }, 2500);
+            });
+        });
+        individualButtons.push(btn);
+        grid.appendChild(btn);
+    });
+
+    downloadAllBtn.addEventListener('click', async () => {
+        for (const btn of individualButtons) {
+            const baseLabel = btn.textContent;
+            btn.textContent = '\u23F3...';
+            try {
+                await forceDownload(btn.dataset.url, btn.dataset.fname);
+                btn.textContent = '\u2705 Done';
+            } catch (err) {
+                btn.textContent = '\u274C Failed';
+                btn.title = (err && err.message) || '';
+            }
+            await new Promise((r) => setTimeout(r, 500));
+        }
+    });
+
     container.prepend(section);
+}
+
+// ── PROMPT CARD HELPER (CSP-safe) ────────────────────────
+// Renders an array of {label, prompt} as cards with copy buttons.
+// Uses createElement + addEventListener so it works under
+// `script-src 'self'` (which blocks inline onclick).
+function renderPromptCards(target, prompts, accentColor) {
+    if (!target || !Array.isArray(prompts)) return;
+    target.innerHTML = '';
+    prompts.forEach((p) => {
+        const card = document.createElement('div');
+        card.style.cssText = 'margin-bottom:14px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;';
+
+        const lbl = document.createElement('p');
+        lbl.style.cssText = `color:${accentColor};font-weight:700;font-size:14px;margin-bottom:6px;`;
+        lbl.textContent = p.label || 'Prompt';
+        card.appendChild(lbl);
+
+        const txt = document.createElement('p');
+        txt.className = 'result-text';
+        txt.style.cssText = 'margin-bottom:8px;white-space:pre-wrap;';
+        txt.textContent = p.prompt || '';
+        card.appendChild(txt);
+
+        const btn = document.createElement('button');
+        btn.className = 'copy-btn';
+        btn.style.cssText = `background:${accentColor};color:#fff;margin-top:0;`;
+        btn.textContent = '\u{1F4CB} Copy';
+        btn.addEventListener('click', () => {
+            const text = p.prompt || '';
+            const restore = () => setTimeout(() => { btn.textContent = '\u{1F4CB} Copy'; }, 2000);
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(() => {
+                    btn.textContent = '\u2705 Copied!';
+                    restore();
+                }).catch(() => {
+                    fallbackCopy(text, btn, restore);
+                });
+            } else {
+                fallbackCopy(text, btn, restore);
+            }
+        });
+        card.appendChild(btn);
+
+        target.appendChild(card);
+    });
+}
+
+// Legacy clipboard fallback for browsers / contexts where the
+// modern API is unavailable (older Safari, non-secure context).
+function fallbackCopy(text, btn, restore) {
+    try {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;opacity:0;';
+        document.body.appendChild(ta);
+        ta.select();
+        const ok = document.execCommand && document.execCommand('copy');
+        document.body.removeChild(ta);
+        btn.textContent = ok ? '\u2705 Copied!' : '\u274C Copy failed';
+        restore();
+    } catch (e) {
+        btn.textContent = '\u274C Copy failed';
+        restore();
+    }
 }
 
 // ── EXTRACT & FLIP ───────────────────────────────────────
@@ -523,14 +631,8 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
             const data = await res.json();
             if (!res.ok || !data.prompts) throw new Error(data.error || 'Failed to generate');
 
-            const promptsHtml = data.prompts.map(p =>
-                `<div style="margin-bottom:14px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;">
-                    <p style="color:#0d6e66;font-weight:700;font-size:14px;margin-bottom:6px;">${escapeHtml(p.label || 'Prompt')}</p>
-                    <p class="result-text" style="margin-bottom:8px;white-space:pre-wrap;">${escapeHtml(p.prompt)}</p>
-                    <button class="copy-btn" style="background:#0d6e66;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='✅ Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
-                </div>`
-            ).join('');
-            wrap.innerHTML = `<h3>\u{1F3AC} Video Creation Prompts</h3><p style="color:#777;font-size:14px;margin-bottom:10px;">Paste each into Runway, Pika, Kling, Sora, or Luma.</p>${promptsHtml}`;
+            wrap.innerHTML = `<h3>\u{1F3AC} Video Creation Prompts</h3><p style="color:#777;font-size:14px;margin-bottom:10px;">Paste each into Runway, Pika, Kling, Sora, or Luma.</p><div data-cards></div>`;
+            renderPromptCards(wrap.querySelector('[data-cards]'), data.prompts, '#0d6e66');
         } catch (err) {
             console.error('Video prompt error:', err);
             wrap.querySelector('.result-text').textContent = '❌ ' + (err.message || 'Could not generate video prompts');
@@ -581,11 +683,29 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
                     const data = await res.json();
 
                     if (res.ok && data.prompt) {
-                        slideDiv.innerHTML = `
-                            <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;">\u{1F5BC}\uFE0F IMAGE ${i + 1} of ${imageUrls.length}</p>
-                            <p class="result-text" style="margin-bottom:8px;">${escapeHtml(data.prompt)}</p>
-                            <button class="copy-btn" style="background:#c2185b;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='\u2705 Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
-                        `;
+                        slideDiv.innerHTML = '';
+                        const lbl = document.createElement('p');
+                        lbl.style.cssText = 'color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;';
+                        lbl.textContent = `\u{1F5BC}\uFE0F IMAGE ${i + 1} of ${imageUrls.length}`;
+                        const txt = document.createElement('p');
+                        txt.className = 'result-text';
+                        txt.style.cssText = 'margin-bottom:8px;';
+                        txt.textContent = data.prompt;
+                        const cBtn = document.createElement('button');
+                        cBtn.className = 'copy-btn';
+                        cBtn.style.cssText = 'background:#c2185b;color:#fff;margin-top:0;';
+                        cBtn.textContent = '\u{1F4CB} Copy';
+                        cBtn.addEventListener('click', () => {
+                            const t = data.prompt || '';
+                            const restore = () => setTimeout(() => { cBtn.textContent = '\u{1F4CB} Copy'; }, 2000);
+                            if (navigator.clipboard && navigator.clipboard.writeText) {
+                                navigator.clipboard.writeText(t).then(() => { cBtn.textContent = '\u2705 Copied!'; restore(); })
+                                    .catch(() => fallbackCopy(t, cBtn, restore));
+                            } else { fallbackCopy(t, cBtn, restore); }
+                        });
+                        slideDiv.appendChild(lbl);
+                        slideDiv.appendChild(txt);
+                        slideDiv.appendChild(cBtn);
                     } else {
                         slideDiv.querySelector('.result-text').textContent = '\u274C ' + (data.error || 'Could not analyze this image');
                         slideDiv.querySelector('.result-text').style.color = '#c2185b';
@@ -624,14 +744,10 @@ function appendPromptButtons(container, flippedScript, originalCaption, platform
                 const data = await res.json();
                 if (!res.ok || !data.prompts) throw new Error(data.error || 'Failed to generate');
 
-                const promptsHtml = data.prompts.map(p =>
-                    `<div style="margin-bottom:14px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;">
-                        <p style="color:#c2185b;font-weight:700;font-size:14px;margin-bottom:6px;">${escapeHtml(p.label || 'Prompt')}</p>
-                        <p class="result-text" style="margin-bottom:8px;white-space:pre-wrap;">${escapeHtml(p.prompt)}</p>
-                        <button class="copy-btn" style="background:#c2185b;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='✅ Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
-                    </div>`
-                ).join('');
-                div.innerHTML = `<h3>\u{1F5BC}️ AI Image Prompts — ${data.prompts.length} ideas</h3><p style="color:#777;font-size:14px;margin-bottom:14px;">Paste each into Midjourney, DALL-E, Ideogram, or Leonardo.</p>${promptsHtml}`;
+                div.innerHTML = `<h3>\u{1F5BC}️ AI Image Prompts — ${data.prompts.length} ideas</h3><p style="color:#777;font-size:14px;margin-bottom:14px;">Paste each into Midjourney, DALL-E, Ideogram, or Leonardo.</p><div data-cards></div>`;
+
+
+                renderPromptCards(div.querySelector('[data-cards]'), data.prompts, '#c2185b');
             } catch (err) {
                 console.error('Image prompt error:', err);
                 div.querySelector('.result-text').textContent = '❌ ' + (err.message || 'Could not generate image prompts');
@@ -852,14 +968,8 @@ function appendVideoPromptSection(container, flippedScript, platform) {
             const data = await res.json();
             if (!res.ok || !data.prompts) throw new Error(data.error || 'Failed to generate');
 
-            const promptsHtml = data.prompts.map(p =>
-                `<div style="margin-bottom:14px;padding:14px;background:#faf8f5;border-radius:10px;border:1px solid #e8e4de;">
-                    <p style="color:#0d6e66;font-weight:700;font-size:14px;margin-bottom:6px;">${escapeHtml(p.label || 'Prompt')}</p>
-                    <p class="result-text" style="margin-bottom:8px;white-space:pre-wrap;">${escapeHtml(p.prompt)}</p>
-                    <button class="copy-btn" style="background:#0d6e66;color:#fff;margin-top:0;" onclick="navigator.clipboard.writeText(this.previousElementSibling.textContent);this.textContent='✅ Copied!';setTimeout(()=>this.textContent='\u{1F4CB} Copy',2000)">\u{1F4CB} Copy</button>
-                </div>`
-            ).join('');
-            wrap.innerHTML = `<h3>\u{1F3AC} Video Creation Prompts</h3><p style="color:#777;font-size:14px;margin-bottom:10px;">Paste each into Runway, Pika, Kling, Sora, or Luma.</p>${promptsHtml}`;
+            wrap.innerHTML = `<h3>\u{1F3AC} Video Creation Prompts</h3><p style="color:#777;font-size:14px;margin-bottom:10px;">Paste each into Runway, Pika, Kling, Sora, or Luma.</p><div data-cards></div>`;
+            renderPromptCards(wrap.querySelector('[data-cards]'), data.prompts, '#0d6e66');
         } catch (err) {
             console.error('Video prompt error:', err);
             wrap.querySelector('.result-text').textContent = '❌ ' + (err.message || 'Could not generate video prompts');
