@@ -66,6 +66,16 @@ exports.handler = async (event) => {
       };
     }
 
+    // SSRF defense: block private / link-local / loopback hostnames so this
+    // proxy can't be used to probe internal services from Netlify's network.
+    if (isBlockedHost(parsed.hostname)) {
+      return {
+        statusCode: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: 'Blocked hostname' })
+      };
+    }
+
     // Fetch the upstream resource
     let upstream;
     try {
@@ -189,6 +199,33 @@ function extractFilenameFromUrl(parsed) {
   } catch {
     return null;
   }
+}
+
+// Block hostnames that point at private / loopback / link-local networks
+// to prevent SSRF (e.g. AWS metadata at 169.254.169.254, internal services).
+function isBlockedHost(hostname) {
+  if (!hostname) return true;
+  const h = hostname.toLowerCase();
+  // Loopback / localhost
+  if (h === 'localhost' || h.endsWith('.localhost')) return true;
+  if (h === '0.0.0.0') return true;
+  // Numeric IPv4 private/loopback/link-local
+  const ipv4 = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4) {
+    const a = +ipv4[1], b = +ipv4[2];
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 0) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true; // link-local incl. AWS metadata
+    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
+  }
+  // IPv6 loopback / link-local / unique-local
+  if (h === '::1' || h === '[::1]') return true;
+  if (h.startsWith('fe80:') || h.startsWith('[fe80:')) return true;
+  if (h.startsWith('fc') || h.startsWith('fd') || h.startsWith('[fc') || h.startsWith('[fd')) return true;
+  return false;
 }
 
 function sanitizeFilename(name) {
