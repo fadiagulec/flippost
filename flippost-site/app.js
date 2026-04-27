@@ -578,6 +578,97 @@ function displayResults(data, platform) {
         // Pass carousel count if we downloaded carousel items earlier
         const carouselCount = window._lastCarouselCount || 0;
         appendPromptButtons(container, data.twisted, data.original, platform, carouselCount);
+        appendShareButton(container, {
+            twisted: data.twisted,
+            hook: data.prompt || '',
+            platform: platform || ''
+        });
+    }
+}
+
+// ── SHAREABLE FLIP URL ────────────────────────────────────
+// Encode the flip into a URL-safe base64 ?d= param so any flip becomes
+// a self-contained shareable page at /share.html?d=...
+// No server, no DB — every recipient who clicks lands on a page that
+// shows the flip + a "Make your own free" CTA.
+function encodeSharePayload(payload) {
+    const json = JSON.stringify(payload);
+    // utf-8 bytes → base64 → url-safe
+    const bytes = new TextEncoder().encode(json);
+    let bin = '';
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function buildShareUrl(payload) {
+    const trimmed = {
+        twisted: (payload.twisted || '').slice(0, 4000),
+        hook: (payload.hook || '').slice(0, 500),
+        platform: payload.platform || ''
+    };
+    const data = encodeSharePayload(trimmed);
+    return window.location.origin + '/share.html?d=' + data;
+}
+
+function appendShareButton(container, payload) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'margin-top:14px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;align-items:center;';
+
+    const shareBtn = document.createElement('button');
+    shareBtn.className = 'btn-tertiary';
+    shareBtn.style.cssText = 'background:#fff;color:#0d6e66;border:2px solid #0d6e66;padding:12px 24px;font-weight:700;border-radius:10px;cursor:pointer;font-size:15px;';
+    shareBtn.textContent = '\u{1F517} Share this Flip';
+
+    const note = document.createElement('span');
+    note.style.cssText = 'color:#888;font-size:13px;';
+    note.textContent = 'Anyone you send the link to lands on a page showing this flip.';
+
+    wrap.appendChild(shareBtn);
+    container.appendChild(wrap);
+    const noteWrap = document.createElement('div');
+    noteWrap.style.cssText = 'text-align:center;margin-top:6px;';
+    noteWrap.appendChild(note);
+    container.appendChild(noteWrap);
+
+    shareBtn.addEventListener('click', () => {
+        const url = buildShareUrl(payload);
+        // Try Web Share API first (mobile), fallback to clipboard
+        if (navigator.share) {
+            navigator.share({
+                title: 'A viral flip — Made with FlipIt',
+                text: payload.hook || 'See this flipped script',
+                url: url
+            }).catch(() => copyShareLink(url, shareBtn));
+        } else {
+            copyShareLink(url, shareBtn);
+        }
+    });
+}
+
+function copyShareLink(url, btn) {
+    const restore = () => setTimeout(() => { btn.textContent = '\u{1F517} Share this Flip'; }, 2500);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(() => {
+            btn.textContent = '✅ Link copied! Paste anywhere.';
+            restore();
+        }).catch(() => {
+            // Fallback via textarea
+            const ta = document.createElement('textarea');
+            ta.value = url;
+            ta.style.cssText = 'position:fixed;top:-1000px;left:-1000px;';
+            document.body.appendChild(ta);
+            ta.select();
+            try {
+                document.execCommand('copy');
+                btn.textContent = '✅ Link copied!';
+            } catch (e) {
+                btn.textContent = '❌ Copy failed';
+            }
+            document.body.removeChild(ta);
+            restore();
+        });
+    } else {
+        btn.textContent = url;
     }
 }
 
@@ -1110,6 +1201,11 @@ async function handleRewriteScript() {
         // Video + Image prompts
         if (data.rewritten) {
             appendPromptButtons(container, data.rewritten, script, null);
+            appendShareButton(container, {
+                twisted: data.rewritten,
+                hook: data.hook || '',
+                platform: ''
+            });
         }
     } catch (err) {
         showError(`Error: ${err.message}`, 'scriptErrorMessage');
