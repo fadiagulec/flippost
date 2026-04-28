@@ -5,7 +5,10 @@
 const COBALT_URL  = 'https://cobalt-api-production-4129.up.railway.app/';
 const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app/download';
 
+const { isProRequest } = require('./_pro_verify');
+
 exports.handler = async (event) => {
+    const isPro = isProRequest(event);
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',

@@ -4,7 +4,10 @@
 // from a flipped script via the Claude API. Replaces the keyword-matching
 // client-side template so prompts actually depict the user's script.
 
+const { isProRequest } = require('./_pro_verify');
+
 exports.handler = async function (event) {
+    const isPro = isProRequest(event);
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type',
