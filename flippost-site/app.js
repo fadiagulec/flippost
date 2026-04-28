@@ -41,7 +41,7 @@ function recordFlipSuccess() {
 
 function showPaywallModal(state) {
     let modal = document.getElementById('flipit-paywall');
-    if (modal) { modal.style.display = 'flex'; return; }
+    if (modal) modal.remove(); // re-render so message matches current state
     modal = document.createElement('div');
     modal.id = 'flipit-paywall';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999;padding:20px;';
@@ -49,26 +49,50 @@ function showPaywallModal(state) {
     card.style.cssText = 'background:#fff;border-radius:16px;padding:36px 32px;max-width:480px;text-align:center;box-shadow:0 20px 60px rgba(0,0,0,0.4);position:relative;';
     const h3 = document.createElement('h3');
     h3.style.cssText = 'font-size:24px;color:#1a1a2e;margin:0 0 12px;line-height:1.3;';
-    h3.textContent = '\u26A1 You\u2019ve used your 3 free flips today';
-    card.appendChild(h3);
     const p1 = document.createElement('p');
     p1.style.cssText = 'color:#555;margin:0 0 24px;line-height:1.5;';
-    const daysSince = Math.max(0, (state.daysSinceFirstUse || 0) - 7);
-    p1.textContent = daysSince > 0
-        ? `Your 7-day free trial ended ${daysSince} day${daysSince === 1 ? '' : 's'} ago. Free tier resets at midnight \u2014 or unlock unlimited now.`
-        : 'Free tier resets at midnight \u2014 or unlock unlimited now.';
+
+    const isProCap = state && state.isPro && (state.proCapHit === 'daily' || state.proCapHit === 'monthly');
+
+    if (isProCap) {
+        if (state.proCapHit === 'daily') {
+            h3.textContent = '\u{1F525} You\u2019ve hit today\u2019s 50-flip Pro cap';
+            p1.textContent = `You\u2019ve used ${state.proDailyCount} of ${state.proDailyLimit} flips today \u2014 thank you for being a power user! Resets at midnight. Need a higher cap? Reply to your purchase email and I\u2019ll set up a custom plan.`;
+        } else {
+            h3.textContent = '\u{1F525} You\u2019ve hit this month\u2019s 1,000-flip cap';
+            p1.textContent = `You\u2019ve used ${state.proMonthlyCount} of ${state.proMonthlyLimit} flips this month \u2014 you\u2019re in the top 1% of users. Resets next month. Need a custom plan? Reply to your purchase email.`;
+        }
+    } else {
+        h3.textContent = '\u26A1 You\u2019ve used your 3 free flips today';
+        const daysSince = Math.max(0, (state.daysSinceFirstUse || 0) - 7);
+        p1.textContent = daysSince > 0
+            ? `Your 7-day free trial ended ${daysSince} day${daysSince === 1 ? '' : 's'} ago. Free tier resets at midnight \u2014 or unlock unlimited now.`
+            : 'Free tier resets at midnight \u2014 or unlock unlimited now.';
+    }
+
+    card.appendChild(h3);
     card.appendChild(p1);
-    const a = document.createElement('a');
-    a.href = 'https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d';
-    a.target = '_blank';
-    a.rel = 'noopener';
-    a.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:16px;margin-bottom:12px;';
-    a.textContent = '\u26A1 Unlock Pro \u2014 $37 Lifetime';
-    card.appendChild(a);
-    const p2 = document.createElement('p');
-    p2.style.cssText = 'color:#888;font-size:13px;margin:8px 0 0;';
-    p2.textContent = 'One-time payment \u00B7 No subscription \u00B7 30-day refund';
-    card.appendChild(p2);
+
+    if (!isProCap) {
+        const a = document.createElement('a');
+        a.href = 'https://buy.stripe.com/eVqaEQ4Rw5aa2nEbPw3Je0d';
+        a.target = '_blank';
+        a.rel = 'noopener';
+        a.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:16px;margin-bottom:12px;';
+        a.textContent = '\u26A1 Unlock Pro \u2014 $37 Lifetime';
+        card.appendChild(a);
+        const p2 = document.createElement('p');
+        p2.style.cssText = 'color:#888;font-size:13px;margin:8px 0 0;';
+        p2.textContent = 'One-time payment \u00B7 No subscription \u00B7 30-day refund';
+        card.appendChild(p2);
+    } else {
+        const mail = document.createElement('a');
+        mail.href = 'mailto:fadiagulec@gmail.com?subject=FlipIt%20Custom%20Plan';
+        mail.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:16px;margin-bottom:8px;';
+        mail.textContent = '\u{1F4E7} Contact about a custom plan';
+        card.appendChild(mail);
+    }
+
     const closeBtn = document.createElement('button');
     closeBtn.textContent = '\u2715';
     closeBtn.setAttribute('aria-label', 'Close');

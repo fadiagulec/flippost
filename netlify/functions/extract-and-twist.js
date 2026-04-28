@@ -1,4 +1,7 @@
+const { isProRequest } = require('./_pro_verify');
+
 exports.handler = async function(event) {
+    const isPro = isProRequest(event);
   const allowedOrigins = ['https://flipit-app.netlify.app'];
   const origin = event.headers?.origin || '';
   const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];

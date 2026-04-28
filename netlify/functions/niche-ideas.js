@@ -5,7 +5,10 @@
 // Uses the Claude API to generate accurate, contextual ideas tailored to
 // the specific niche and description (no canned templates).
 
+const { isProRequest } = require('./_pro_verify');
+
 exports.handler = async function(event) {
+    const isPro = isProRequest(event);
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type',

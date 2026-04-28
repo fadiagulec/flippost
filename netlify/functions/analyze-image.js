@@ -4,7 +4,10 @@
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 
+const { isProRequest } = require('./_pro_verify');
+
 exports.handler = async (event) => {
+    const isPro = isProRequest(event);
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'Content-Type',

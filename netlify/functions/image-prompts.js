@@ -12,7 +12,10 @@
 //
 // Returns: { prompts: [{ label, prompt }, ...] }
 
+const { isProRequest } = require('./_pro_verify');
+
 exports.handler = async function (event) {
+    const isPro = isProRequest(event);
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type',
