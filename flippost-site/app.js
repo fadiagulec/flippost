@@ -1744,6 +1744,13 @@ async function handleRewriteScript() {
         if (flippedSection) flippedSection.classList.add('remix-flipped-section');
         if (data.hook) appendSection(container, '\u{1F3AF} Proven Hook', data.hook, true);
         if (data.cta) appendSection(container, '\u{1F4E3} Call to Action', data.cta, true);
+        // Richer output from the deeper-output backend (optional — only present
+        // when the model emitted the extra sections). Rendered defensively.
+        if (Array.isArray(data.scenes) && data.scenes.length) {
+            appendSection(container, '\u{1F3AC} Scene-by-Scene', data.scenes.join('\n'), true);
+        }
+        if (data.caption) appendSection(container, '\u{1F4DD} Ready-to-Post Caption', data.caption, true);
+        if (data.hashtags) appendSection(container, '#️⃣ Hashtags', data.hashtags, true);
         recordFlipSuccess();
 
         // Video + Image prompts
