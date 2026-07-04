@@ -526,18 +526,13 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
             let transcoded = false;
             let transcodeErr = '';
             try {
-                const resp = await fetch(RAILWAY_PREPARE_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoData: rawBase64 })
-                });
-                const data = await resp.json().catch(() => ({}));
-                if (resp.ok && data.success && data.videoData) {
+                const data = await postHeavyJob('/prepare-eraser', RAILWAY_PREPARE_URL, { videoData: rawBase64 });
+                if (data.success && data.videoData) {
                     previewBase64 = data.videoData;
                     previewMime = data.mime || 'video/mp4';
                     transcoded = true;
                 } else {
-                    transcodeErr = data.error || ('HTTP ' + resp.status);
+                    transcodeErr = data.error || 'unknown';
                     console.warn('Transcode failed, using original:', transcodeErr, data.detail || '');
                 }
             } catch (xErr) {
@@ -596,8 +591,8 @@ document.getElementById('downloadBtn').addEventListener('click', handleDownload)
 // After a Railway base64 download succeeds, surface a button that opens a
 // modal where the user can drag rectangles over a video preview to mark
 // watermarks / handles / logos. Selected boxes are sent to the Railway
-// /erase-region endpoint which runs ffmpeg's delogo filter over each.
-const RAILWAY_ERASE_URL = '/.netlify/functions/erase-region-video';
+// /erase-region endpoint (via postHeavyJob) which runs ffmpeg's delogo
+// filter over each.
 
 function showEraseAreasButton() {
     const host = document.getElementById('errorMessage');
@@ -807,21 +802,17 @@ function openEraseModal() {
         eraseBtn.textContent = '⏳ Erasing…';
         try {
             // Route to the right endpoint and use the right field names.
-            const endpoint = isImageMode
+            const railwayPath = isImageMode ? '/erase-region-image' : '/erase-region';
+            const proxyPath = isImageMode
                 ? '/.netlify/functions/erase-region-image'
-                : RAILWAY_ERASE_URL;
+                : '/.netlify/functions/erase-region-video';
             const payload = isImageMode
                 ? { imageData: v.base64, regions }
                 : { videoData: v.base64, regions };
-            const resp = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-            const data = await resp.json();
+            const data = await postHeavyJob(railwayPath, proxyPath, payload);
             const outField = isImageMode ? 'imageData' : 'videoData';
-            if (!resp.ok || !data.success || !data[outField]) {
-                throw new Error(data.error || ('Server returned ' + resp.status));
+            if (!data.success || !data[outField]) {
+                throw new Error(data.error || 'Erase failed.');
             }
             const b = atob(data[outField]);
             const arr = new Uint8Array(b.length);
@@ -3211,21 +3202,13 @@ function showSuccess(msg, id) {
             const baseName = (file.name || 'flipit-scenes').replace(/\.[a-z0-9]{2,4}$/i, '');
 
             setStatus('⏳ Detecting scene changes (5–15s, normal)…', null);
-            const resp = await fetch('/.netlify/functions/extract-scenes', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ videoData: rawBase64 })
-            });
-            // Netlify platform errors (timeout, oversized response) come back
-            // as plain text, not JSON — parse defensively so the user sees a
-            // useful message instead of "Unexpected token".
-            const rawText = await resp.text();
-            let data;
-            try { data = JSON.parse(rawText); } catch {
-                throw new Error('Server error (' + resp.status + ') — try a shorter or smaller video.');
-            }
-            if (!resp.ok || !data.success || !Array.isArray(data.scenes) || data.scenes.length === 0) {
-                throw new Error(data.error || ('Server returned ' + resp.status));
+            const data = await postHeavyJob(
+                '/extract-scenes',
+                '/.netlify/functions/extract-scenes',
+                { videoData: rawBase64 }
+            );
+            if (!data.success || !Array.isArray(data.scenes) || data.scenes.length === 0) {
+                throw new Error(data.error || 'No scenes detected.');
             }
             const note = data.truncated ? ` (showing first ${data.count} of ${data.detected})` : '';
             setStatus(`✅ Found ${data.count} scene${data.count === 1 ? '' : 's'}${note}.`, true);
@@ -3382,14 +3365,13 @@ function showSuccess(msg, id) {
             const rawBase64 = btoa(binStr);
 
             setStatus('⏳ Extracting audio + transcribing (Whisper, 5–20s)…', null);
-            const resp = await fetch('/.netlify/functions/transcribe-video', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ videoData: rawBase64 })
-            });
-            const data = await resp.json();
-            if (!resp.ok || !data.success || !data.transcript) {
-                throw new Error(data.error || ('Server returned ' + resp.status));
+            const data = await postHeavyJob(
+                '/transcribe-video',
+                '/.netlify/functions/transcribe-video',
+                { videoData: rawBase64 }
+            );
+            if (!data.success || !data.transcript) {
+                throw new Error(data.error || 'No transcript returned.');
             }
             setStatus(`✅ Transcribed ${Math.round(data.duration || 0)}s of ${data.language || 'audio'}.`, true);
             renderTranscript(data);
@@ -3502,3 +3484,61 @@ function showSuccess(msg, id) {
         handleFile(f);
     });
 })();
+
+// ── HEAVY VIDEO JOB TRANSPORT ─────────────────────────────────────
+// Scene-grab / transcribe / erase / transcode all POST multi-MB base64
+// bodies. Netlify Functions HARD-CAP both request and response at 6MB,
+// so routing a real-sized video through the proxy returns a non-JSON 400
+// before our code even runs (the "Server error 400 / Unexpected token"
+// the user hit). Railway (plain Flask, CORS-enabled) has no such cap, so
+// we POST directly there first and only fall back to the Netlify proxy
+// when the direct call fails at the NETWORK level — the original
+// "Failed to fetch" case where a corporate/mobile network blocks
+// *.up.railway.app. Big files work; blocked networks still degrade.
+const FLIPIT_RAILWAY_BASE = 'https://web-production-8afc3.up.railway.app';
+
+async function readHeavyJobResponse(resp) {
+    const text = await resp.text();
+    let data;
+    try {
+        data = JSON.parse(text);
+    } catch {
+        if (resp.status === 413 || /too large|payload too/i.test(text)) {
+            throw new Error('That file is too large — try one under ~15 MB or a shorter clip.');
+        }
+        throw new Error('Server error (' + resp.status + '). Try a shorter or smaller file.');
+    }
+    if (!resp.ok) throw new Error(data.error || ('Server returned ' + resp.status));
+    return data;
+}
+
+async function postHeavyJob(railwayPath, netlifyProxyPath, payloadObj) {
+    const body = JSON.stringify(payloadObj);
+    // 1) Direct to Railway — no 6MB cap, ~90s ceiling for slow ffmpeg jobs.
+    try {
+        const resp = await fetch(FLIPIT_RAILWAY_BASE + railwayPath, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+            signal: AbortSignal.timeout(90000)
+        });
+        return await readHeavyJobResponse(resp);
+    } catch (directErr) {
+        // Fall back to the Netlify proxy ONLY on a genuine network failure
+        // (fetch throws TypeError, or the timeout aborts). HTTP/parse errors
+        // thrown by readHeavyJobResponse are real server responses — surface
+        // them instead of masking with a fallback that fails the same way.
+        const isNetwork = directErr && (
+            directErr.name === 'TypeError' ||
+            directErr.name === 'AbortError' ||
+            /failed to fetch|load failed|networkerror/i.test(directErr.message || '')
+        );
+        if (!isNetwork) throw directErr;
+        const resp = await fetch(netlifyProxyPath, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body
+        });
+        return await readHeavyJobResponse(resp);
+    }
+}
