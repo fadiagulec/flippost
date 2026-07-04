@@ -37,7 +37,9 @@ exports.handler = __wrapErr( async function (event) {
     }
 
     // ── Rate limit gate ──
-    const quota = await enforceAiQuota(event, isPro);
+    // Weight 3: this endpoint fans out to up to 10 parallel Claude calls,
+    // so one request costs several times a normal flip upstream.
+    const quota = await enforceAiQuota(event, isPro, 3);
     if (!quota.allowed) return rateLimitResponse(headers, quota);
 
     // ── Parse body ───────────────────────────────────────────

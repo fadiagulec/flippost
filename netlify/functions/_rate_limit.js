@@ -15,10 +15,23 @@
 //   const tokenQuota = await enforceTokenIssueQuota(event);
 //   if (!tokenQuota.allowed) return rateLimitResponse(headers, tokenQuota);
 //
-// Limits:
+// Limits ("unlimited, fair use" — generous enough that ~95% of legit users
+// never see them, tight enough that a reseller can't run the API all night):
 //   Free AI calls:   3 / day per IP
-//   Pro AI calls:    50 / day  AND  1000 / month per IP (whichever hits first)
+//   Pro AI calls:    50 units / day  AND  1000 units / month per IP
 //   issue-pro-token: 5 / minute per IP (Stripe-spam mitigation)
+//
+// WEIGHTS: heavy endpoints consume more than 1 unit per request, because
+// their upstream cost is a multiple of a normal call:
+//   image-prompts  → weight 3  (fans out to up to 10 parallel Claude calls)
+//   analyze-image  → weight 2  (vision tokens cost ~2-4x a text call)
+//   everything else → weight 1
+//
+// REVOCATION: refunded/abusive purchases are enforced here. When a Pro
+// token's sid appears in the blob store as `revoked:{sid}`, the request is
+// quota-limited as FREE tier even though the HMAC is valid. This is what
+// makes the 30-day refund promise enforceable without a user database.
+// Manage entries via /revoke-pro (protected by FLIPIT_CREATOR_CODE).
 //
 // Storage:
 //   Netlify Blobs store `flipit-quota`. Keys:
@@ -30,7 +43,7 @@
 //
 // Failure mode:
 //   If Netlify Blobs is unavailable for any reason, fail OPEN (allow the
-//   request, log a warning) rather than break the app for a $37 product.
+//   request, log a warning) rather than break the app for a $57 product.
 
 const crypto = require('crypto');
 
@@ -188,14 +201,47 @@ function memWrite(key, count, ttlSec) {
     }
 }
 
-// ── Public: AI quota gate ─────────────────────────────────────────────────
+// ── Token payload helper (revocation) ────────────────────────────────────
+// Extract the sid from an X-Flipit-Pro token WITHOUT re-verifying the HMAC —
+// callers only reach this after isProRequest() already verified it. Returns
+// null on any parse failure.
 
-async function enforceAiQuota(event, isPro) {
+function extractTokenSid(event) {
+    try {
+        const headers = (event && event.headers) || {};
+        const token = String(headers['x-flipit-pro'] || headers['X-Flipit-Pro'] || '');
+        if (!token.startsWith('flpt.')) return null;
+        const payloadB64 = token.slice(5, token.lastIndexOf('.'));
+        const json = Buffer.from(payloadB64.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+        const payload = JSON.parse(json);
+        return (payload && typeof payload.sid === 'string') ? payload.sid : null;
+    } catch {
+        return null;
+    }
+}
+
+async function isRevokedSid(store, sid) {
+    if (!store || !sid) return false; // fail open — same policy as the limiter
+    try {
+        const v = await store.get(`revoked:${sid}`, { type: 'json' });
+        return !!(v && v.revoked);
+    } catch {
+        return false;
+    }
+}
+
+// ── Public: AI quota gate ─────────────────────────────────────────────────
+// `weight` — how many quota units this request consumes (default 1). Heavy
+// endpoints pass more (image-prompts: 3, analyze-image: 2) so the caps map
+// to real upstream cost instead of raw request count.
+
+async function enforceAiQuota(event, isPro, weight = 1) {
     const store = getStoreSafe();
     const ipHash = hashIp(getClientIp(event));
     const t = nowParts();
     const dayKey   = `ai:${ipHash}:${t.day}`;
     const monthKey = `ai:${ipHash}:${t.month}`;
+    const w = Math.max(1, Math.min(10, Math.floor(weight) || 1));
 
     // Pick storage backend: prefer Blobs (cross-instance, persistent), fall
     // back to in-memory (per-warm-instance) when Blobs is unavailable.
@@ -204,6 +250,15 @@ async function enforceAiQuota(event, isPro) {
         if (store) await writeCount(store, k, c);
         else memWrite(k, c, ttl);
     };
+
+    // Revocation gate: a refunded purchase keeps a cryptographically valid
+    // token, so demote revoked sids to free-tier quota here.
+    if (isPro) {
+        const sid = extractTokenSid(event);
+        if (await isRevokedSid(store, sid)) {
+            isPro = false;
+        }
+    }
 
     if (!isPro) {
         const dayCount = await readKey(dayKey);
@@ -217,7 +272,7 @@ async function enforceAiQuota(event, isPro) {
                 retryAfterSec: secondsTillMidnightUtc()
             };
         }
-        const newCount = dayCount + 1;
+        const newCount = dayCount + w;
         await writeKey(dayKey, newCount, secondsTillMidnightUtc());
         return {
             allowed: true,
@@ -256,8 +311,8 @@ async function enforceAiQuota(event, isPro) {
         };
     }
 
-    const newDay = dayCount + 1;
-    const newMonth = monthCount + 1;
+    const newDay = dayCount + w;
+    const newMonth = monthCount + w;
     await Promise.all([
         writeKey(dayKey, newDay, secondsTillMidnightUtc()),
         writeKey(monthKey, newMonth, secondsTillEndOfMonthUtc())
@@ -336,13 +391,13 @@ function rateLimitResponse(corsHeaders, info) {
 
     let message;
     if (info && info.proCapHit === 'monthly') {
-        message = "You've hit your Pro monthly cap (1000 flips). Email support@flipit.app for a custom plan.";
+        message = "You've hit this month's fair-use cap — you're in the top 1% of users! Resets next month, or email contact@earnwith-ai.com for a custom plan.";
     } else if (info && info.proCapHit === 'daily') {
-        message = "You've hit your Pro daily cap (50 flips). Resets at midnight UTC.";
+        message = "You've hit today's fair-use cap. Resets at midnight UTC — or email contact@earnwith-ai.com if you need more.";
     } else if (scope === 'minute') {
         message = "Too many requests. Please wait a moment and try again.";
     } else {
-        message = "Free tier limit reached (3 flips/day). Resets at midnight UTC, or upgrade to Pro for $57 lifetime.";
+        message = "Free tier limit reached (3 flips/day). Resets at midnight UTC, or unlock FlipIt Pro — $57 once, yours forever.";
     }
 
     return {
@@ -373,11 +428,31 @@ async function handler() {
     };
 }
 
+// ── Public: revocation management (used by /revoke-pro) ──────────────────
+
+async function setRevoked(sid, revoked) {
+    const store = getStoreSafe();
+    if (!store) throw new Error('Blob store unavailable — cannot persist revocation.');
+    const key = `revoked:${sid}`;
+    if (revoked) {
+        await store.setJSON(key, { revoked: true, at: Date.now() });
+    } else {
+        await store.delete(key);
+    }
+}
+
+async function getRevoked(sid) {
+    const store = getStoreSafe();
+    return isRevokedSid(store, sid);
+}
+
 module.exports = {
     getClientIp,
     enforceAiQuota,
     enforceTokenIssueQuota,
     peek,
     rateLimitResponse,
+    setRevoked,
+    getRevoked,
     handler
 };

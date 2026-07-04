@@ -36,7 +36,8 @@ exports.handler = __wrapErr(async (event) => {
   }
 
   // ── Rate limit gate ──
-  const quota = await enforceAiQuota(event, isPro);
+  // Weight 2: vision input tokens cost ~2-4x a plain text call.
+  const quota = await enforceAiQuota(event, isPro, 2);
   if (!quota.allowed) return rateLimitResponse(headers, quota);
 
   if (!ANTHROPIC_API_KEY) {

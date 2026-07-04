@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>FlipIt — Owner Admin</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #faf8f5; color: #1a1a2e; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+        .card { background: #fff; border: 1px solid #e8e4de; border-radius: 16px; max-width: 520px; width: 100%; padding: 32px; }
+        h1 { font-size: 22px; color: #0d6e66; margin-bottom: 6px; }
+        p.sub { color: #777; font-size: 14px; line-height: 1.5; margin-bottom: 20px; }
+        label { display: block; font-size: 13px; font-weight: 600; color: #444; margin: 14px 0 4px; }
+        input { width: 100%; padding: 11px; border: 1.5px solid #e0dcd5; border-radius: 8px; font-size: 14px; }
+        .row { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+        button { flex: 1; min-width: 110px; padding: 12px; border-radius: 8px; font-weight: 700; font-size: 14px; cursor: pointer; border: none; }
+        #revokeBtn { background: #c2185b; color: #fff; }
+        #restoreBtn { background: linear-gradient(135deg,#0d6e66,#0a9b8e); color: #fff; }
+        #checkBtn { background: #fff; color: #444; border: 1.5px solid #e0dcd5; }
+        #status { margin-top: 16px; font-size: 14px; min-height: 20px; }
+        .hint { background: #faf8f5; border: 1px solid #e8e4de; border-radius: 8px; padding: 12px; font-size: 12px; color: #666; line-height: 1.5; margin-top: 20px; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>🔐 Owner Admin — Pro Access</h1>
+    <p class="sub">Revoke a refunded customer's Pro access, restore it, or check status. Only works with your creator code.</p>
+    <label for="code">Creator code</label>
+    <input type="password" id="code" autocomplete="off" placeholder="FLIPIT_CREATOR_CODE value" />
+    <label for="sid">Checkout session ID (sid)</label>
+    <input type="text" id="sid" autocomplete="off" placeholder="cs_live_... (from Stripe → payment → Checkout session)" />
+    <div class="row">
+        <button id="revokeBtn" type="button">🚫 Revoke</button>
+        <button id="restoreBtn" type="button">✅ Restore</button>
+        <button id="checkBtn" type="button">🔎 Check</button>
+    </div>
+    <div id="status"></div>
+    <div class="hint">
+        <strong>How to refund someone:</strong> 1) Refund the payment in Stripe. 2) On the payment page, copy the <em>Checkout session ID</em> (starts with <code>cs_live_</code>). 3) Paste it here and click Revoke. Their Pro token instantly drops to free-tier limits.
+    </div>
+</div>
+<script src="admin.js"></script>
+</body>
+</html>

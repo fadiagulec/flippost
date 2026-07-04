@@ -74,14 +74,14 @@ function showPaywallModal(state, reason) {
             p1.textContent = `You\u2019ve used ${state.proDailyCount} of ${state.proDailyLimit} flips today \u2014 thank you for being a power user! Resets at midnight. Need a higher cap? Reply to your purchase email.`;
         }
     } else if (isProFeature) {
-        h3.textContent = '\u{1F512} Pro-only feature';
-        p1.textContent = 'Image Prompts, Video Prompts, and AI Vision are Pro features. Free tier gets 3 flips/day with rate + rewrite. Unlock everything below \u2014 one-time payment, no subscription.';
+        h3.textContent = '\u{1F512} That\u2019s a Pro tool';
+        p1.textContent = 'You found one of the heavy hitters. Unlock the full FlipIt pipeline below \u2014 one payment, yours forever.';
     } else {
         h3.textContent = '\u26A1 You\u2019ve used your 3 free flips today';
         const daysSince = Math.max(0, ((state && state.daysSinceFirstUse) || 0) - 7);
         p1.textContent = daysSince > 0
-            ? `Your 7-day free trial ended ${daysSince} day${daysSince === 1 ? '' : 's'} ago. Free tier resets at midnight \u2014 or unlock unlimited below.`
-            : 'Free tier resets at midnight \u2014 or unlock unlimited below.';
+            ? `Your 7-day free trial ended ${daysSince} day${daysSince === 1 ? '' : 's'} ago. Free tier resets at midnight \u2014 or stop counting flips entirely.`
+            : 'Free tier resets at midnight \u2014 or stop counting flips entirely.';
     }
 
     card.appendChild(h3);
@@ -95,6 +95,27 @@ function showPaywallModal(state, reason) {
         mail.textContent = '\u{1F4E7} Contact about a custom plan';
         card.appendChild(mail);
     } else {
+        // Value stack: sell the transformation + the bonus, not a tab list.
+        const stack = document.createElement('ul');
+        stack.style.cssText = 'list-style:none;text-align:left;margin:0 auto 20px;max-width:360px;padding:0;';
+        [
+            ['\u267E\uFE0F', '<strong>Unlimited flips</strong> \u2014 script rewrites, remixes, transcripts & scores (fair use)'],
+            ['\u{1F9F0}', '<strong>The full toolkit</strong> \u2014 download, watermark eraser, scene grabber, image prompts'],
+            ['\u{1F381}', '<strong>Creator Vault included</strong> \u2014 100 proven hooks by niche + posting playbook'],
+            ['\u{1F6E1}\uFE0F', '<strong>30-day guarantee</strong> \u2014 not for you? Full refund, no questions']
+        ].forEach(([icon, html]) => {
+            const li = document.createElement('li');
+            li.style.cssText = 'display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;font-size:14px;color:#444;line-height:1.45;';
+            const ic = document.createElement('span');
+            ic.textContent = icon;
+            const tx = document.createElement('span');
+            tx.innerHTML = html; // static strings above, no user input
+            li.appendChild(ic);
+            li.appendChild(tx);
+            stack.appendChild(li);
+        });
+        card.appendChild(stack);
+
         // Single CTA: $57 lifetime, one-time payment (anchored against $99)
         const a = document.createElement('a');
         a.href = STRIPE_LIFETIME_LINK;
@@ -105,8 +126,12 @@ function showPaywallModal(state, reason) {
         card.appendChild(a);
         const trust = document.createElement('p');
         trust.style.cssText = 'color:#888;font-size:13px;margin:8px 0 0;line-height:1.5;';
-        trust.textContent = 'One-time payment \u00B7 No subscription \u00B7 30-day refund \u00B7 All future updates included';
+        trust.textContent = 'One-time payment \u00B7 No subscription \u00B7 All future updates included';
         card.appendChild(trust);
+        const restore = document.createElement('p');
+        restore.style.cssText = 'color:#aaa;font-size:12px;margin:10px 0 0;';
+        restore.innerHTML = 'Already bought? Open the receipt link from your purchase email to restore access, or <a href="mailto:contact@earnwith-ai.com?subject=Restore%20my%20FlipIt%20Pro" style="color:#0d6e66;">email us</a>.';
+        card.appendChild(restore);
     }
 
     const closeBtn = document.createElement('button');
