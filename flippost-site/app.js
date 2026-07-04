@@ -3138,6 +3138,7 @@ function showSuccess(msg, id) {
         'eraser-tab': '#eraser',
         'score-tab': '#score',
         'scenes-tab': '#scenes',
+        'transcribe-tab': '#transcribe',
         'history-tab': '#history'
     };
     const HASH_TO_TAB = Object.fromEntries(Object.entries(TAB_TO_HASH).map(([k, v]) => [v, k]));
@@ -3303,6 +3304,176 @@ function showSuccess(msg, id) {
         a.click();
         document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 30000);
+    }
+
+    fileInput.addEventListener('change', (e) => {
+        const f = e.target.files && e.target.files[0];
+        fileInput.value = '';
+        handleFile(f);
+    });
+    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, (e) => {
+        e.preventDefault(); e.stopPropagation();
+        drop.style.background = '#e8f4f3';
+    }));
+    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, (e) => {
+        e.preventDefault(); e.stopPropagation();
+        drop.style.background = '#f7fbfa';
+    }));
+    drop.addEventListener('drop', (e) => {
+        const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        handleFile(f);
+    });
+})();
+
+// ── TRANSCRIBE (Whisper) ──────────────────────────────────────────
+// Uploads a video, calls /transcribe-video (Railway → OpenAI Whisper),
+// shows the full spoken transcript + timestamped segments. Includes
+// Copy + Flip This Script buttons for one-click handoff to Rewrite.
+(function transcribeModule() {
+    const fileInput = document.getElementById('transcribeFile');
+    const drop = document.getElementById('transcribeDrop');
+    const status = document.getElementById('transcribeStatus');
+    const results = document.getElementById('transcribeResultsContainer');
+    if (!fileInput || !drop || !status || !results) return;
+
+    const MAX_BYTES = 18 * 1024 * 1024;
+
+    function setStatus(msg, ok) {
+        status.textContent = msg || '';
+        status.style.color = ok === false ? '#c2185b' : (ok === true ? '#0d6e66' : '#555');
+    }
+
+    function fmtTime(sec) {
+        const s = Math.max(0, Math.round(sec));
+        const m = Math.floor(s / 60);
+        const r = s % 60;
+        return m + ':' + String(r).padStart(2, '0');
+    }
+
+    async function handleFile(file) {
+        if (!file) return;
+        if (!/^video\//i.test(file.type) && !/\.(mp4|mov|m4v|webm)$/i.test(file.name)) {
+            setStatus("That doesn't look like a video. Try MP4, MOV, or WebM.", false);
+            return;
+        }
+        if (file.size > MAX_BYTES) {
+            setStatus(`File is ${(file.size/1048576).toFixed(1)} MB — please use one under 18 MB.`, false);
+            return;
+        }
+        if (typeof gateOrPaywall === 'function' && !gateOrPaywall()) return;
+
+        setStatus('⏳ Reading video…', null);
+        try {
+            const buf = await file.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            let binStr = '';
+            const CHUNK = 0x8000;
+            for (let i = 0; i < bytes.length; i += CHUNK) {
+                binStr += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+            }
+            const rawBase64 = btoa(binStr);
+
+            setStatus('⏳ Extracting audio + transcribing (Whisper, 5–20s)…', null);
+            const resp = await fetch('/.netlify/functions/transcribe-video', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoData: rawBase64 })
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success || !data.transcript) {
+                throw new Error(data.error || ('Server returned ' + resp.status));
+            }
+            setStatus(`✅ Transcribed ${Math.round(data.duration || 0)}s of ${data.language || 'audio'}.`, true);
+            renderTranscript(data);
+        } catch (err) {
+            console.error('Transcribe failed:', err);
+            setStatus('❌ ' + (err.message || 'Transcription failed.'), false);
+        }
+    }
+
+    function renderTranscript(data) {
+        results.innerHTML = '';
+        const section = document.createElement('div');
+        section.className = 'result-section';
+
+        const heading = document.createElement('h3');
+        heading.textContent = '🎙️ Spoken Transcript';
+        section.appendChild(heading);
+
+        const full = document.createElement('div');
+        full.style.cssText = 'background:#faf8f5;border:1px solid #e8e4de;border-radius:10px;padding:14px;line-height:1.6;color:#1a1a2e;font-size:15px;white-space:pre-wrap;margin-bottom:12px;';
+        full.textContent = data.transcript;
+        section.appendChild(full);
+
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;';
+
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.textContent = '📋 Copy transcript';
+        copyBtn.style.cssText = 'flex:1;min-width:140px;padding:12px;background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;';
+        copyBtn.addEventListener('click', () => {
+            navigator.clipboard.writeText(data.transcript).then(() => {
+                const old = copyBtn.textContent;
+                copyBtn.textContent = '✅ Copied';
+                setTimeout(() => { copyBtn.textContent = old; }, 1500);
+            }).catch(() => {});
+        });
+        actions.appendChild(copyBtn);
+
+        const flipBtn = document.createElement('button');
+        flipBtn.type = 'button';
+        flipBtn.textContent = '✨ Flip this script';
+        flipBtn.style.cssText = 'flex:2;min-width:160px;padding:12px;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;';
+        flipBtn.addEventListener('click', () => {
+            if (typeof switchTab === 'function') switchTab('script-tab');
+            const ta = document.getElementById('scriptInput');
+            if (ta) { ta.value = data.transcript; ta.dispatchEvent(new Event('input')); }
+            const rewriteBtn = document.getElementById('rewriteBtn');
+            if (rewriteBtn) {
+                rewriteBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                setTimeout(() => rewriteBtn.click(), 250);
+            }
+        });
+        actions.appendChild(flipBtn);
+
+        section.appendChild(actions);
+
+        if (Array.isArray(data.segments) && data.segments.length > 0) {
+            const details = document.createElement('details');
+            details.style.cssText = 'background:#fff;border:1px solid #e8e4de;border-radius:10px;padding:10px 14px;';
+            const summary = document.createElement('summary');
+            summary.textContent = `⏱️ ${data.segments.length} timestamped segments`;
+            summary.style.cssText = 'cursor:pointer;font-weight:700;color:#1a1a2e;font-size:14px;';
+            details.appendChild(summary);
+            const list = document.createElement('div');
+            list.style.cssText = 'margin-top:10px;';
+            data.segments.forEach(seg => {
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;gap:10px;padding:6px 0;border-top:1px dashed #eee;';
+                const t = document.createElement('div');
+                t.style.cssText = 'color:#0d6e66;font-weight:700;font-size:13px;min-width:80px;font-variant-numeric:tabular-nums;';
+                t.textContent = fmtTime(seg.start) + ' – ' + fmtTime(seg.end);
+                const txt = document.createElement('div');
+                txt.style.cssText = 'flex:1;color:#444;font-size:14px;line-height:1.5;';
+                txt.textContent = seg.text;
+                row.appendChild(t);
+                row.appendChild(txt);
+                list.appendChild(row);
+            });
+            details.appendChild(list);
+            section.appendChild(details);
+        }
+
+        results.appendChild(section);
+
+        if (window.FlipItHistory && window.FlipItHistory.add) {
+            window.FlipItHistory.add({
+                kind: 'rewrite',
+                title: '🎙️ ' + data.transcript.slice(0, 80),
+                payload: { original: data.transcript }
+            });
+        }
     }
 
     fileInput.addEventListener('change', (e) => {

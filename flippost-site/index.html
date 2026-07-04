@@ -37,6 +37,7 @@
             <button class="tab-btn" data-tab="eraser-tab">🎯 Eraser</button>
             <button class="tab-btn" data-tab="score-tab">⚡ ViralScore</button>
             <button class="tab-btn" data-tab="scenes-tab">🎞️ Scene Grabber</button>
+            <button class="tab-btn" data-tab="transcribe-tab">🎙️ Transcribe</button>
             <button class="tab-btn" data-tab="history-tab">🕘 History</button>
         </div>
 
@@ -350,7 +351,27 @@
             <div id="scenesResultsContainer"></div>
         </div>
 
-        <!-- Tab 11: History — saved past flips, scores, prompts -->
+        <!-- Tab 11: Transcribe — pull the spoken script out of any video -->
+        <div id="transcribe-tab" class="tab-content">
+            <div class="input-section">
+                <div style="text-align:center;margin-bottom:10px;">
+                    <h3 style="margin:0 0 6px;font-size:20px;color:#1a1a2e;">🎙️ Transcribe</h3>
+                    <p style="margin:0;color:#666;font-size:14px;line-height:1.5;">
+                        Upload any video and pull the <strong>spoken script</strong> — every word the creator actually says, with timestamps. Then Flip it into your own version.
+                    </p>
+                </div>
+                <label for="transcribeFile" id="transcribeDrop" style="display:block;cursor:pointer;border:2px dashed #0d6e66;border-radius:14px;background:#f7fbfa;padding:36px 20px;text-align:center;transition:background 0.2s;">
+                    <div style="font-size:42px;line-height:1;">🎧</div>
+                    <div style="margin-top:8px;font-weight:700;color:#0d6e66;font-size:16px;">Tap to choose a video</div>
+                    <div style="margin-top:4px;font-size:13px;color:#888;">MP4 / MOV / WebM · up to ~18 MB</div>
+                    <input type="file" id="transcribeFile" accept="video/mp4,video/quicktime,video/webm,video/*" style="display:none;" />
+                </label>
+                <div id="transcribeStatus" style="margin-top:12px;text-align:center;font-size:14px;color:#555;min-height:20px;"></div>
+            </div>
+            <div id="transcribeResultsContainer"></div>
+        </div>
+
+        <!-- Tab 12: History — saved past flips, scores, prompts -->
         <div id="history-tab" class="tab-content">
             <div class="input-section">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
@@ -380,6 +401,6 @@
 
     <script src="access.js"></script>
     <!-- Cache-bust the JS so users always get the latest eraser logic. -->
-    <script src="app.js?v=scenes1"></script>
+    <script src="app.js?v=transcribe1"></script>
 </body>
 </html>

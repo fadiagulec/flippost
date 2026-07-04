@@ -560,6 +560,109 @@ def erase_region():
         })
 
 
+@app.route('/transcribe-video', methods=['POST', 'OPTIONS'])
+def transcribe_video():
+    """Transcribe the spoken audio of a video using OpenAI Whisper.
+    Extracts the audio track with ffmpeg (mono 16kHz mp3 to minimize
+    payload + cost), then POSTs it to Whisper. Returns the full text
+    plus timestamped segments.
+
+    Request body:
+      videoData: base64 string of the input video
+
+    Returns: { success, transcript, segments: [{start, end, text}], duration, language }
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    openai_key = os.environ.get('OPENAI_API_KEY')
+    if not openai_key:
+        return jsonify({'error': 'Transcription not configured (missing OPENAI_API_KEY on the backend).'}), 503
+
+    data = request.get_json(silent=True) or {}
+    video_b64 = (data.get('videoData') or '').strip()
+    if not video_b64:
+        return jsonify({'error': 'Missing videoData'}), 400
+    if len(video_b64) > 25 * 1024 * 1024:
+        return jsonify({'error': 'Video too large (max ~18MB)'}), 413
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            video_bytes = base64.b64decode(video_b64, validate=False)
+        except Exception:
+            return jsonify({'error': 'Invalid base64'}), 400
+        if len(video_bytes) < 1024:
+            return jsonify({'error': 'Video too small'}), 400
+
+        in_path = os.path.join(tmpdir, 'in.mp4')
+        audio_path = os.path.join(tmpdir, 'audio.mp3')
+        with open(in_path, 'wb') as f:
+            f.write(video_bytes)
+
+        # Extract audio track: mono, 16kHz, 48kbps mp3 — the sweet spot for
+        # Whisper. Keeps quality high enough for accurate transcription while
+        # cutting the file to ~360KB per minute (10x smaller than the video).
+        cmd = ['ffmpeg', '-y', '-i', in_path, '-vn',
+               '-ac', '1', '-ar', '16000', '-b:a', '48k',
+               '-f', 'mp3', audio_path]
+        try:
+            ff = subprocess.run(cmd, capture_output=True, text=True, timeout=45)
+            if ff.returncode != 0:
+                print(f'[transcribe] audio extract failed rc={ff.returncode} stderr={(ff.stderr or "")[-300:]}', flush=True)
+                return jsonify({'error': 'Audio extraction failed', 'detail': (ff.stderr or '')[-300:]}), 500
+        except FileNotFoundError:
+            return jsonify({'error': 'ffmpeg not installed'}), 500
+        except subprocess.TimeoutExpired:
+            return jsonify({'error': 'Audio extraction timed out'}), 408
+
+        if not os.path.exists(audio_path) or os.path.getsize(audio_path) < 128:
+            return jsonify({'error': 'No audio track found in video.'}), 400
+
+        # Whisper has a hard 25 MB per-file cap.
+        audio_size = os.path.getsize(audio_path)
+        if audio_size > 24 * 1024 * 1024:
+            return jsonify({'error': 'Audio too long — try a shorter clip.'}), 413
+
+        try:
+            import requests as _req  # already used elsewhere in this backend
+        except ImportError:
+            return jsonify({'error': 'requests library not installed on backend'}), 500
+
+        try:
+            with open(audio_path, 'rb') as af:
+                resp = _req.post(
+                    'https://api.openai.com/v1/audio/transcriptions',
+                    headers={'Authorization': f'Bearer {openai_key}'},
+                    files={'file': ('audio.mp3', af, 'audio/mpeg')},
+                    data={'model': 'whisper-1', 'response_format': 'verbose_json'},
+                    timeout=90
+                )
+        except Exception as e:
+            return jsonify({'error': f'Whisper call failed: {e}'}), 502
+
+        if resp.status_code != 200:
+            print(f'[transcribe] whisper rc={resp.status_code} body={resp.text[:300]}', flush=True)
+            return jsonify({'error': 'Whisper API returned an error.', 'detail': resp.text[:300]}), 502
+
+        result = resp.json()
+        # Trim segments to just the fields the UI needs — Whisper's verbose_json
+        # includes token-level detail we don't need to ship over the wire.
+        segments = []
+        for s in (result.get('segments') or []):
+            segments.append({
+                'start': float(s.get('start', 0)),
+                'end':   float(s.get('end', 0)),
+                'text':  str(s.get('text', '')).strip()
+            })
+        return jsonify({
+            'success': True,
+            'transcript': (result.get('text') or '').strip(),
+            'segments': segments,
+            'duration': float(result.get('duration') or 0),
+            'language': result.get('language') or ''
+        })
+
+
 @app.route('/extract-scenes', methods=['POST', 'OPTIONS'])
 def extract_scenes():
     """Extract distinct scene-change frames from a video using ffmpeg's
