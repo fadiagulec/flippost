@@ -3216,11 +3216,19 @@ function showSuccess(msg, id) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ videoData: rawBase64 })
             });
-            const data = await resp.json();
+            // Netlify platform errors (timeout, oversized response) come back
+            // as plain text, not JSON — parse defensively so the user sees a
+            // useful message instead of "Unexpected token".
+            const rawText = await resp.text();
+            let data;
+            try { data = JSON.parse(rawText); } catch {
+                throw new Error('Server error (' + resp.status + ') — try a shorter or smaller video.');
+            }
             if (!resp.ok || !data.success || !Array.isArray(data.scenes) || data.scenes.length === 0) {
                 throw new Error(data.error || ('Server returned ' + resp.status));
             }
-            setStatus(`✅ Found ${data.count} scene${data.count === 1 ? '' : 's'}.`, true);
+            const note = data.truncated ? ` (showing first ${data.count} of ${data.detected})` : '';
+            setStatus(`✅ Found ${data.count} scene${data.count === 1 ? '' : 's'}${note}.`, true);
             renderScenes(data.scenes, baseName);
         } catch (err) {
             console.error('Scene grabber failed:', err);

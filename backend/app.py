@@ -702,17 +702,20 @@ def extract_scenes():
         #    whose scene-change score exceeds 0.35 (balanced sensitivity —
         #    higher = fewer frames, lower = more).
         #  - Commas inside filter expressions must be escaped as \,
-        #  - scale to max 1080 on longest side keeps payload small.
+        #  - 720px longest side + q:v 5: this response travels back through a
+        #    Netlify Function which hard-caps response bodies at 6MB. 15
+        #    1080px frames blew that cap and Netlify returned a plain-text
+        #    "Internal Error" that broke the frontend's JSON parse.
         scene_filter = (
             "select='eq(n\\,0)+gt(scene\\,0.35)',"
-            "scale=1080:1080:force_original_aspect_ratio=decrease"
+            "scale=720:720:force_original_aspect_ratio=decrease"
         )
         cmd = [
             'ffmpeg', '-y', '-i', in_path,
             '-vf', scene_filter,
             '-vsync', 'vfr',
             '-frames:v', '15',
-            '-q:v', '4',
+            '-q:v', '5',
             os.path.join(tmpdir, 'scene_%03d.jpg')
         ]
         try:
@@ -725,7 +728,13 @@ def extract_scenes():
         except subprocess.TimeoutExpired:
             return jsonify({'error': 'Processing timed out (try a shorter clip)'}), 408
 
+        # Byte budget: total base64 must stay comfortably under Netlify's
+        # 6MB response cap (JSON overhead + headers included). Stop adding
+        # scenes once we hit ~4.5MB and tell the client how many we dropped.
+        BUDGET = int(4.5 * 1024 * 1024)
         scenes = []
+        detected = 0
+        used = 0
         for name in sorted(os.listdir(tmpdir)):
             if not name.startswith('scene_') or not name.endswith('.jpg'):
                 continue
@@ -733,8 +742,12 @@ def extract_scenes():
             size = os.path.getsize(path)
             if size < 512:
                 continue
+            detected += 1
             with open(path, 'rb') as f:
                 b64 = base64.b64encode(f.read()).decode('utf-8')
+            if used + len(b64) > BUDGET:
+                continue  # keep counting `detected`, skip payload
+            used += len(b64)
             scenes.append({
                 'index': len(scenes) + 1,
                 'base64': b64,
@@ -747,7 +760,9 @@ def extract_scenes():
         return jsonify({
             'success': True,
             'scenes': scenes,
-            'count': len(scenes)
+            'count': len(scenes),
+            'detected': detected,
+            'truncated': detected > len(scenes)
         })
 
 
