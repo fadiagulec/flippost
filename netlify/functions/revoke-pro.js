@@ -37,8 +37,10 @@ exports.handler = __wrapErr(async function (event) {
         return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
 
-    const creatorCode = process.env.FLIPIT_CREATOR_CODE;
-    if (!creatorCode || String(creatorCode).length < 16) {
+    // Trim to match the submitted code's normalization — a trailing newline/space
+    // pasted into the Netlify env var would otherwise make every request fail.
+    const creatorCode = String(process.env.FLIPIT_CREATOR_CODE || '').trim();
+    if (!creatorCode || creatorCode.length < 16) {
         return { statusCode: 503, headers, body: JSON.stringify({ error: 'Service unavailable.' }) };
     }
 
@@ -48,7 +50,7 @@ exports.handler = __wrapErr(async function (event) {
     }
 
     const submitted = String(body.code || '').trim();
-    if (!submitted || !constantTimeEq(submitted, String(creatorCode))) {
+    if (!submitted || !constantTimeEq(submitted, creatorCode)) {
         await new Promise(r => setTimeout(r, 250)); // brute-force damper
         return { statusCode: 401, headers, body: JSON.stringify({ error: 'Unauthorized' }) };
     }

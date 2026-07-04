@@ -44,13 +44,17 @@ exports.handler = __wrapErr( async function (event) {
         return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
 
-    const creatorCode = process.env.FLIPIT_CREATOR_CODE;
+    // Trim the env var too. Netlify's dashboard makes it easy to paste the
+    // secret with a trailing newline/space; without this the submitted code
+    // (already trimmed below) can never match and every redeem returns a
+    // baffling "Invalid code".
+    const creatorCode = String(process.env.FLIPIT_CREATOR_CODE || '').trim();
     const tokenSecret = process.env.FLIPIT_TOKEN_SECRET;
     if (!creatorCode || !tokenSecret) {
         console.error('redeem-creator: missing FLIPIT_CREATOR_CODE or FLIPIT_TOKEN_SECRET');
         return { statusCode: 503, headers, body: JSON.stringify({ error: 'Service temporarily unavailable.' }) };
     }
-    if (String(creatorCode).length < 16) {
+    if (creatorCode.length < 16) {
         console.error('redeem-creator: FLIPIT_CREATOR_CODE too short (need 16+ chars)');
         return { statusCode: 503, headers, body: JSON.stringify({ error: 'Service temporarily unavailable.' }) };
     }
@@ -63,7 +67,7 @@ exports.handler = __wrapErr( async function (event) {
         return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid request' }) };
     }
 
-    if (!submitted || !constantTimeEq(submitted, String(creatorCode))) {
+    if (!submitted || !constantTimeEq(submitted, creatorCode)) {
         // Tiny delay to dampen brute force; real protection is the entropy of the secret.
         await new Promise(r => setTimeout(r, 250));
         return { statusCode: 401, headers, body: JSON.stringify({ error: 'Invalid code' }) };
