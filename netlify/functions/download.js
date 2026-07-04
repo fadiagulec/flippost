@@ -91,10 +91,15 @@ exports.handler = __wrapErr( async (event) => {
     } catch (e) { console.log('Railway failed:', e.message); }
   }
 
-  // 1b. Instagram: Railway yt-dlp FIRST (it can use INSTAGRAM_COOKIES_B64 to
-  // authenticate — the only path that works for most IG content). Cobalt/embed
-  // are tried later as fallbacks.
+  // 1b. Instagram: Apify FIRST (no login cookies needed — reuses the same
+  // APIFY_TOKEN + actor as the Instagram Browse tab, returns a direct video
+  // URL). Falls back to Railway yt-dlp (which needs INSTAGRAM_COOKIES_B64) and
+  // then Cobalt/embed if Apify is unavailable.
   if (platform === 'instagram') {
+    try {
+      const a = await tryApifyInstagram(url);
+      if (a) return { statusCode: 200, headers, body: JSON.stringify({ ...a, source: 'apify-ig', platform }) };
+    } catch (e) { console.log('Apify IG failed:', e.message); }
     try {
       const result = await tryRailway(url, removeWatermark);
       if (result && !result._tooLarge) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'railway', platform }) };
@@ -245,6 +250,72 @@ async function tryCobalt(url) {
       })));
       return { downloadUrl: items[0].url, carousel: items, filename: data.filename || null, type: items[0].type, mediaCount: items.length };
     }
+    return null;
+  } finally { clearTimeout(timeout); }
+}
+
+// Instagram download via Apify's instagram-scraper — the SAME actor (and the
+// same APIFY_TOKEN) that already powers the Instagram Browse tab. This gets a
+// direct videoUrl with NO login cookies required, which is the reliable IG
+// path. Returns a carousel array when the post is a sidecar.
+async function tryApifyInstagram(url) {
+  const apifyToken = process.env.APIFY_TOKEN;
+  if (!apifyToken) return null;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 45000);
+  try {
+    const apifyUrl = 'https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items?timeout=50';
+    const resp = await fetch(apifyUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apifyToken },
+      body: JSON.stringify({
+        directUrls: [url],
+        resultsType: 'posts',
+        resultsLimit: 1,
+        addParentData: false,
+        enhanceUserSearchWithFacebookPage: false
+      }),
+      signal: controller.signal
+    });
+    if (!resp.ok) { console.log('Apify IG non-OK:', resp.status); return null; }
+    const raw = await resp.json();
+    const item = Array.isArray(raw) ? raw[0] : null;
+    if (!item) return null;
+
+    const shortcode = (typeof item.shortCode === 'string' && item.shortCode) || 'instagram';
+    const fnameBase = 'instagram_' + shortcode;
+
+    // Sidecar / carousel: collect each child's best media URL.
+    if (Array.isArray(item.childPosts) && item.childPosts.length > 0) {
+      const items = item.childPosts.map(cp => {
+        const v = typeof cp.videoUrl === 'string' && cp.videoUrl.startsWith('http') ? cp.videoUrl : null;
+        const img = typeof cp.displayUrl === 'string' && cp.displayUrl.startsWith('http') ? cp.displayUrl : null;
+        if (v) return { url: v, type: 'video' };
+        if (img) return { url: img, type: 'image' };
+        return null;
+      }).filter(Boolean);
+      if (items.length > 1) {
+        return { downloadUrl: items[0].url, carousel: items, type: items[0].type, mediaCount: items.length, filename: fnameBase };
+      }
+      if (items.length === 1) {
+        return { downloadUrl: items[0].url, type: items[0].type, filename: fnameBase + (items[0].type === 'video' ? '.mp4' : '.jpg') };
+      }
+    }
+
+    // Single video (Reel / video post).
+    if (typeof item.videoUrl === 'string' && item.videoUrl.startsWith('http')) {
+      return { downloadUrl: item.videoUrl, type: 'video', filename: fnameBase + '.mp4' };
+    }
+    // Single image post.
+    const img = (typeof item.displayUrl === 'string' && item.displayUrl.startsWith('http')) ? item.displayUrl
+      : (Array.isArray(item.images) && typeof item.images[0] === 'string' ? item.images[0] : null);
+    if (img) {
+      return { downloadUrl: img, type: 'image', filename: fnameBase + '.jpg' };
+    }
+    return null;
+  } catch (e) {
+    console.log('Apify IG failed:', e.message);
     return null;
   } finally { clearTimeout(timeout); }
 }
