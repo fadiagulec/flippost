@@ -963,8 +963,13 @@ async function handleDownload() {
                 const fname = data.filename || `flipit-${platform || 'media'}${ext}`;
                 try {
                     await forceDownload(data.downloadUrl, fname);
-                    const mediaType = data.type === 'image' ? '\u{1F5BC}\uFE0F Image' : '\u{1F3AC} Video';
-                    showSuccess(`\u2705 ${mediaType} download started!`, 'errorMessage');
+                    if (data.thumbnailOnly) {
+                        // We could only get the cover image, not the video.
+                        showError('\u26A0\uFE0F Couldn\u2019t grab the video itself \u2014 only its thumbnail downloaded. This post may be private, region-locked, or need login. Try a different link, or a TikTok URL (most reliable).', 'errorMessage');
+                    } else {
+                        const mediaType = data.type === 'image' ? '\u{1F5BC}\uFE0F Image' : '\u{1F3AC} Video';
+                        showSuccess(`\u2705 ${mediaType} download started!`, 'errorMessage');
+                    }
                 } catch (dlErr) {
                     showError('\u274C ' + (dlErr.message || 'Download failed') + '. The file may be too large \u2014 try a shorter clip.', 'errorMessage');
                 }

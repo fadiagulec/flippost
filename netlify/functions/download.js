@@ -72,17 +72,34 @@ exports.handler = __wrapErr( async (event) => {
 
   const platform = detectPlatform(url);
 
-  // 1. TikTok + YouTube + Instagram: Railway yt-dlp returns base64 video
-  // Instagram needs INSTAGRAM_COOKIES_B64 set on the Railway service to work.
-  // If Railway returns _tooLarge, fall through to Cobalt (which streams via
-  // a tunnel URL and isn't bound by the 6MB Netlify response cap).
   let railwayTooLarge = null;
-  if (platform === 'tiktok' || platform === 'youtube' || platform === 'instagram') {
+  let cobaltTried = false;
+
+  // 1a. TikTok + YouTube: Cobalt FIRST. It streams via a tunnel URL (no 6MB
+  // cap) and is far more reliable than datacenter yt-dlp, which platforms
+  // 403 and which goes stale between deploys. Railway yt-dlp is the fallback.
+  if (platform === 'tiktok' || platform === 'youtube') {
+    try {
+      cobaltTried = true;
+      const c = await tryCobalt(url);
+      if (c) return { statusCode: 200, headers, body: JSON.stringify({ ...c, source: 'cobalt', platform }) };
+    } catch (e) { console.log('Cobalt(primary) failed:', e.message); }
     try {
       const result = await tryRailway(url, removeWatermark);
       if (result && !result._tooLarge) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'railway', platform }) };
       if (result && result._tooLarge) railwayTooLarge = result.sizeMb;
     } catch (e) { console.log('Railway failed:', e.message); }
+  }
+
+  // 1b. Instagram: Railway yt-dlp FIRST (it can use INSTAGRAM_COOKIES_B64 to
+  // authenticate — the only path that works for most IG content). Cobalt/embed
+  // are tried later as fallbacks.
+  if (platform === 'instagram') {
+    try {
+      const result = await tryRailway(url, removeWatermark);
+      if (result && !result._tooLarge) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'railway', platform }) };
+      if (result && result._tooLarge) railwayTooLarge = result.sizeMb;
+    } catch (e) { console.log('Railway(IG) failed:', e.message); }
   }
 
   // 2. Twitter/X: syndication API
@@ -101,13 +118,14 @@ exports.handler = __wrapErr( async (event) => {
     } catch (e) { console.log('LinkedIn scrape failed:', e.message); }
   }
 
-  // 4. Cobalt for ALL platforms (works for TikTok/YouTube/IG/X/FB and streams
-  // via a tunnel URL — bypasses Netlify's 6MB body cap, so use this for
-  // anything Railway flagged as too-large too).
-  try {
-    const result = await tryCobalt(url);
-    if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'cobalt', platform }) };
-  } catch (e) { console.log('Cobalt failed:', e.message); }
+  // 4. Cobalt for the remaining platforms (IG/X/FB/etc.) and the too-large
+  // case. Skipped when we already tried Cobalt as the primary above.
+  if (!cobaltTried) {
+    try {
+      const result = await tryCobalt(url);
+      if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'cobalt', platform }) };
+    } catch (e) { console.log('Cobalt failed:', e.message); }
+  }
 
   // 5. Instagram embed scrape (last shot before giving up)
   if (platform === 'instagram') {
@@ -117,16 +135,27 @@ exports.handler = __wrapErr( async (event) => {
     } catch (e) { console.log('Instagram embed failed:', e.message); }
   }
 
+  // Video-first platforms: an og-meta/microlink IMAGE is a thumbnail, NOT the
+  // video the user asked for. Flag it so the frontend warns honestly instead
+  // of claiming a successful download.
+  const VIDEO_PLATFORMS = ['tiktok', 'youtube', 'instagram', 'facebook', 'threads', 'x'];
+  const markThumb = (result) => {
+    if (result && result.type === 'image' && VIDEO_PLATFORMS.includes(platform)) {
+      return { ...result, thumbnailOnly: true };
+    }
+    return result;
+  };
+
   // 5. Microlink fallback
   try {
     const result = await tryMicrolink(url);
-    if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'microlink', platform }) };
+    if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...markThumb(result), source: 'microlink', platform }) };
   } catch (e) { console.log('Microlink failed:', e.message); }
 
   // 6. OG meta tags
   try {
     const result = await tryOgMeta(url);
-    if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...result, source: 'og-meta', platform }) };
+    if (result) return { statusCode: 200, headers, body: JSON.stringify({ ...markThumb(result), source: 'og-meta', platform }) };
   } catch (e) { console.log('OG meta failed:', e.message); }
 
   // 7. Generic fallback

@@ -1,7 +1,10 @@
 flask>=3.0.0
 flask-cors>=4.0.0
 requests>=2.32.0
-yt-dlp[default]==2026.3.17
+# Floor, not pin: yt-dlp extractors break weekly as platforms change, so a
+# fresh Railway build should always pull the newest release ≥ this floor.
+# (A hard == pin is why TikTok/YouTube extraction went stale.)
+yt-dlp[default]>=2026.3.17
 curl-cffi>=0.7.0
 instaloader>=4.13
 # Railway's new Railpack builder defaults to gunicorn for Flask apps.
