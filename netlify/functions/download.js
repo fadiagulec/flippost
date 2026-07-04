@@ -262,10 +262,14 @@ async function tryApifyInstagram(url) {
   const apifyToken = process.env.APIFY_TOKEN;
   if (!apifyToken) return null;
 
+  // Bound tightly: Netlify Functions hard-cap at 26s, so cap the Apify sync
+  // run at 18s (actor param) + a 20s client abort. A single-reel scrape is
+  // typically 5-15s; if it's slower we abort cleanly and fall through to the
+  // Railway/Cobalt fallbacks rather than letting Netlify kill the whole call.
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 45000);
+  const timeout = setTimeout(() => controller.abort(), 20000);
   try {
-    const apifyUrl = 'https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items?timeout=50';
+    const apifyUrl = 'https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items?timeout=18';
     const resp = await fetch(apifyUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apifyToken },
