@@ -36,6 +36,7 @@
             <button class="tab-btn" data-tab="imgprompt-tab">📸 Image Prompts</button>
             <button class="tab-btn" data-tab="eraser-tab">🎯 Eraser</button>
             <button class="tab-btn" data-tab="score-tab">⚡ ViralScore</button>
+            <button class="tab-btn" data-tab="scenes-tab">🎞️ Scene Grabber</button>
             <button class="tab-btn" data-tab="history-tab">🕘 History</button>
         </div>
 
@@ -329,7 +330,27 @@
             <div id="scoreResultsContainer"></div>
         </div>
 
-        <!-- Tab 9: History — saved past flips, scores, prompts -->
+        <!-- Tab 10: Scene Grabber — extract every distinct frame from a video -->
+        <div id="scenes-tab" class="tab-content">
+            <div class="input-section">
+                <div style="text-align:center;margin-bottom:10px;">
+                    <h3 style="margin:0 0 6px;font-size:20px;color:#1a1a2e;">🎞️ Scene Grabber</h3>
+                    <p style="margin:0;color:#666;font-size:14px;line-height:1.5;">
+                        Upload any video — get back one crisp image per <strong>scene change</strong> (each overlay, each new visual beat). Perfect for pulling slides out of slideshow-style Reels.
+                    </p>
+                </div>
+                <label for="scenesFile" id="scenesDrop" style="display:block;cursor:pointer;border:2px dashed #0d6e66;border-radius:14px;background:#f7fbfa;padding:36px 20px;text-align:center;transition:background 0.2s;">
+                    <div style="font-size:42px;line-height:1;">🎬</div>
+                    <div style="margin-top:8px;font-weight:700;color:#0d6e66;font-size:16px;">Tap to choose a video</div>
+                    <div style="margin-top:4px;font-size:13px;color:#888;">MP4 / MOV / WebM · up to ~18 MB</div>
+                    <input type="file" id="scenesFile" accept="video/mp4,video/quicktime,video/webm,video/*" style="display:none;" />
+                </label>
+                <div id="scenesStatus" style="margin-top:12px;text-align:center;font-size:14px;color:#555;min-height:20px;"></div>
+            </div>
+            <div id="scenesResultsContainer"></div>
+        </div>
+
+        <!-- Tab 11: History — saved past flips, scores, prompts -->
         <div id="history-tab" class="tab-content">
             <div class="input-section">
                 <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
@@ -359,6 +380,6 @@
 
     <script src="access.js"></script>
     <!-- Cache-bust the JS so users always get the latest eraser logic. -->
-    <script src="app.js?v=allfour1"></script>
+    <script src="app.js?v=scenes1"></script>
 </body>
 </html>

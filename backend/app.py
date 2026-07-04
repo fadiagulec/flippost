@@ -560,6 +560,94 @@ def erase_region():
         })
 
 
+@app.route('/extract-scenes', methods=['POST', 'OPTIONS'])
+def extract_scenes():
+    """Extract distinct scene-change frames from a video using ffmpeg's
+    scene detector. Perfect for slideshow-style Reels where the visual
+    beat changes with each overlay/graphic. Returns up to 15 JPEG frames.
+
+    Request body:
+      videoData: base64 string of the input video
+
+    Returns: { success, scenes: [{ index, base64, size_bytes }], count }
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json(silent=True) or {}
+    video_b64 = (data.get('videoData') or '').strip()
+
+    if not video_b64:
+        return jsonify({'error': 'Missing videoData'}), 400
+    if len(video_b64) > 25 * 1024 * 1024:
+        return jsonify({'error': 'Video too large (max ~18MB)'}), 413
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        try:
+            video_bytes = base64.b64decode(video_b64, validate=False)
+        except Exception:
+            return jsonify({'error': 'Invalid base64'}), 400
+        if len(video_bytes) < 1024:
+            return jsonify({'error': 'Video too small'}), 400
+
+        in_path = os.path.join(tmpdir, 'in.mp4')
+        with open(in_path, 'wb') as f:
+            f.write(video_bytes)
+
+        # Scene filter breakdown:
+        #  - select='eq(n\,0)+gt(scene\,0.35)' — grab frame 0 AND any frame
+        #    whose scene-change score exceeds 0.35 (balanced sensitivity —
+        #    higher = fewer frames, lower = more).
+        #  - Commas inside filter expressions must be escaped as \,
+        #  - scale to max 1080 on longest side keeps payload small.
+        scene_filter = (
+            "select='eq(n\\,0)+gt(scene\\,0.35)',"
+            "scale=1080:1080:force_original_aspect_ratio=decrease"
+        )
+        cmd = [
+            'ffmpeg', '-y', '-i', in_path,
+            '-vf', scene_filter,
+            '-vsync', 'vfr',
+            '-frames:v', '15',
+            '-q:v', '4',
+            os.path.join(tmpdir, 'scene_%03d.jpg')
+        ]
+        try:
+            ff = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if ff.returncode != 0:
+                print(f'[extract-scenes] ffmpeg failed rc={ff.returncode} stderr={(ff.stderr or "")[-300:]}', flush=True)
+                return jsonify({'error': 'ffmpeg failed', 'detail': (ff.stderr or '')[-300:]}), 500
+        except FileNotFoundError:
+            return jsonify({'error': 'ffmpeg not installed'}), 500
+        except subprocess.TimeoutExpired:
+            return jsonify({'error': 'Processing timed out (try a shorter clip)'}), 408
+
+        scenes = []
+        for name in sorted(os.listdir(tmpdir)):
+            if not name.startswith('scene_') or not name.endswith('.jpg'):
+                continue
+            path = os.path.join(tmpdir, name)
+            size = os.path.getsize(path)
+            if size < 512:
+                continue
+            with open(path, 'rb') as f:
+                b64 = base64.b64encode(f.read()).decode('utf-8')
+            scenes.append({
+                'index': len(scenes) + 1,
+                'base64': b64,
+                'size_bytes': size
+            })
+
+        if not scenes:
+            return jsonify({'error': 'No distinct scenes detected — try a video with more visual changes.'}), 500
+
+        return jsonify({
+            'success': True,
+            'scenes': scenes,
+            'count': len(scenes)
+        })
+
+
 @app.route('/erase-region-image', methods=['POST', 'OPTIONS'])
 def erase_region_image():
     """Image counterpart to /erase-region. Same input shape, same delogo

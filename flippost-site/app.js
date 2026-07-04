@@ -3137,6 +3137,7 @@ function showSuccess(msg, id) {
         'imgprompt-tab': '#image-prompts',
         'eraser-tab': '#eraser',
         'score-tab': '#score',
+        'scenes-tab': '#scenes',
         'history-tab': '#history'
     };
     const HASH_TO_TAB = Object.fromEntries(Object.entries(TAB_TO_HASH).map(([k, v]) => [v, k]));
@@ -3165,4 +3166,160 @@ function showSuccess(msg, id) {
     window.addEventListener('hashchange', applyHash);
     applyHash();
     syncHashFromTab();
+})();
+
+// ── SCENE GRABBER (#A) ────────────────────────────────────────────
+// Takes a video upload, POSTs to /extract-scenes, renders a grid of
+// scene-change frames with individual + Download-All buttons.
+(function sceneGrabberModule() {
+    const fileInput = document.getElementById('scenesFile');
+    const drop = document.getElementById('scenesDrop');
+    const status = document.getElementById('scenesStatus');
+    const results = document.getElementById('scenesResultsContainer');
+    if (!fileInput || !drop || !status || !results) return;
+
+    const MAX_BYTES = 18 * 1024 * 1024;
+
+    function setStatus(msg, ok) {
+        status.textContent = msg || '';
+        status.style.color = ok === false ? '#c2185b' : (ok === true ? '#0d6e66' : '#555');
+    }
+
+    async function handleFile(file) {
+        if (!file) return;
+        if (!/^video\//i.test(file.type) && !/\.(mp4|mov|m4v|webm)$/i.test(file.name)) {
+            setStatus("That doesn't look like a video. Try MP4, MOV, or WebM.", false);
+            return;
+        }
+        if (file.size > MAX_BYTES) {
+            setStatus(`File is ${(file.size/1048576).toFixed(1)} MB — please use one under 18 MB.`, false);
+            return;
+        }
+        if (typeof gateOrPaywall === 'function' && !gateOrPaywall()) return;
+
+        setStatus('⏳ Reading video…', null);
+        try {
+            const buf = await file.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            let binStr = '';
+            const CHUNK = 0x8000;
+            for (let i = 0; i < bytes.length; i += CHUNK) {
+                binStr += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+            }
+            const rawBase64 = btoa(binStr);
+            const baseName = (file.name || 'flipit-scenes').replace(/\.[a-z0-9]{2,4}$/i, '');
+
+            setStatus('⏳ Detecting scene changes (5–15s, normal)…', null);
+            const resp = await fetch('/.netlify/functions/extract-scenes', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoData: rawBase64 })
+            });
+            const data = await resp.json();
+            if (!resp.ok || !data.success || !Array.isArray(data.scenes) || data.scenes.length === 0) {
+                throw new Error(data.error || ('Server returned ' + resp.status));
+            }
+            setStatus(`✅ Found ${data.count} scene${data.count === 1 ? '' : 's'}.`, true);
+            renderScenes(data.scenes, baseName);
+        } catch (err) {
+            console.error('Scene grabber failed:', err);
+            setStatus('❌ ' + (err.message || 'Could not extract scenes.'), false);
+        }
+    }
+
+    function jpegToBlob(b64) {
+        const bin = atob(b64);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        return new Blob([arr], { type: 'image/jpeg' });
+    }
+
+    function renderScenes(scenes, baseName) {
+        results.innerHTML = '';
+        const section = document.createElement('div');
+        section.className = 'result-section';
+
+        const heading = document.createElement('h3');
+        heading.textContent = `🎞️ ${scenes.length} scene${scenes.length === 1 ? '' : 's'} detected`;
+        section.appendChild(heading);
+
+        const dlAll = document.createElement('button');
+        dlAll.type = 'button';
+        dlAll.textContent = `⬇️ Download all ${scenes.length}`;
+        dlAll.style.cssText = 'display:inline-flex;align-items:center;gap:8px;padding:14px 24px;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:10px;font-weight:700;font-size:16px;cursor:pointer;margin-bottom:12px;width:100%;justify-content:center;';
+        section.appendChild(dlAll);
+
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px;';
+        section.appendChild(grid);
+
+        const perCardBtns = [];
+        scenes.forEach(sc => {
+            const card = document.createElement('div');
+            card.style.cssText = 'background:#fff;border:1px solid #e8e4de;border-radius:12px;padding:10px;display:flex;flex-direction:column;gap:8px;';
+            const img = document.createElement('img');
+            img.src = 'data:image/jpeg;base64,' + sc.base64;
+            img.alt = 'Scene ' + sc.index;
+            img.loading = 'lazy';
+            img.style.cssText = 'width:100%;height:auto;border-radius:8px;display:block;background:#f0eee9;';
+            card.appendChild(img);
+
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.textContent = '⬇️ Scene ' + sc.index;
+            btn.style.cssText = 'background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;padding:8px 12px;border-radius:8px;font-weight:700;font-size:13px;cursor:pointer;';
+            btn.addEventListener('click', () => downloadOne(sc, baseName));
+            card.appendChild(btn);
+            grid.appendChild(card);
+            perCardBtns.push({ sc, btn });
+        });
+
+        results.appendChild(section);
+
+        dlAll.addEventListener('click', async () => {
+            for (const { sc, btn } of perCardBtns) {
+                const old = btn.textContent;
+                btn.textContent = '⏳…';
+                try {
+                    downloadOne(sc, baseName);
+                    btn.textContent = '✅ Saved';
+                } catch (e) {
+                    btn.textContent = '❌ Failed';
+                }
+                // Small stagger so browsers don't drop rapid-fire downloads.
+                await new Promise(r => setTimeout(r, 400));
+                btn.textContent = old;
+            }
+        });
+    }
+
+    function downloadOne(sc, baseName) {
+        const blob = jpegToBlob(sc.base64);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = baseName + '-scene-' + String(sc.index).padStart(2, '0') + '.jpg';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 30000);
+    }
+
+    fileInput.addEventListener('change', (e) => {
+        const f = e.target.files && e.target.files[0];
+        fileInput.value = '';
+        handleFile(f);
+    });
+    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, (e) => {
+        e.preventDefault(); e.stopPropagation();
+        drop.style.background = '#e8f4f3';
+    }));
+    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, (e) => {
+        e.preventDefault(); e.stopPropagation();
+        drop.style.background = '#f7fbfa';
+    }));
+    drop.addEventListener('drop', (e) => {
+        const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+        handleFile(f);
+    });
 })();
