@@ -1738,6 +1738,10 @@ async function handleRewriteScript() {
         container.innerHTML = '';
         appendSection(container, 'Original Script', script, false);
         appendSection(container, '\u2728 Flipped Version', data.rewritten, true);
+        // Tag the Flipped Version section so remix-by-instruction can replace
+        // its output in place without disturbing the Original section.
+        const flippedSection = container.lastElementChild;
+        if (flippedSection) flippedSection.classList.add('remix-flipped-section');
         if (data.hook) appendSection(container, '\u{1F3AF} Proven Hook', data.hook, true);
         if (data.cta) appendSection(container, '\u{1F4E3} Call to Action', data.cta, true);
         recordFlipSuccess();
@@ -1750,6 +1754,9 @@ async function handleRewriteScript() {
                 hook: data.hook || '',
                 platform: ''
             });
+            // Remix-by-instruction: iterate on the just-generated flipped script
+            // with a freeform directive ("make it funnier", "shorten to 30s"\u2026).
+            appendRemixControl(container, data.rewritten);
         }
     } catch (err) {
         showError(`Error: ${err.message}`, 'scriptErrorMessage');
@@ -1758,6 +1765,135 @@ async function handleRewriteScript() {
         btn.disabled = false;
         btn.textContent = orig;
     }
+}
+
+// \u2500\u2500 REMIX BY INSTRUCTION \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// Takes the just-generated flipped script and regenerates it with a freeform
+// instruction. Reuses /rewrite-script (no backend change): the instruction is
+// injected as a leading directive line inside the `script` payload, which the
+// existing system prompt honors. Voice context is added automatically by the
+// fetch wrapper (plumbVoiceIntoFetches). Each remix operates on the LATEST
+// version so users can iterate. Gated behind gateOrPaywall like other Pro
+// actions. The existing history recorder auto-logs the run (kind 'rewrite').
+function appendRemixControl(container, currentFlipped) {
+    // Iterative state: always remix the newest version.
+    let latest = currentFlipped || '';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'result-section remix-control-section';
+    wrap.style.cssText = 'margin-top:16px;';
+
+    const heading = document.createElement('h3');
+    heading.textContent = '\u{1F504} Remix by instruction';
+    wrap.appendChild(heading);
+
+    const sub = document.createElement('p');
+    sub.style.cssText = 'color:#777;font-size:14px;margin:0 0 12px;';
+    sub.textContent = 'Tell FlipIt how to change the flipped version above \u2014 each remix builds on the latest one.';
+    wrap.appendChild(sub);
+
+    // Instruction input + Remix button row.
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;align-items:stretch;';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'remix-instruction-input';
+    input.placeholder = 'Tell FlipIt how to change it \u2014 e.g. make it funnier, shorten to 30s, punchier hook';
+    input.style.cssText = 'flex:1;min-width:220px;padding:12px 14px;border:1.5px solid #e8e4de;border-radius:10px;font-size:15px;color:#1a1a2e;background:#fff;';
+
+    const remixBtn = document.createElement('button');
+    remixBtn.type = 'button';
+    remixBtn.className = 'remix-btn';
+    remixBtn.textContent = '\u{1F504} Remix';
+    remixBtn.style.cssText = 'background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:10px;padding:12px 24px;font-weight:700;font-size:15px;letter-spacing:0.5px;cursor:pointer;white-space:nowrap;';
+
+    row.appendChild(input);
+    row.appendChild(remixBtn);
+    wrap.appendChild(row);
+
+    // One-tap chips that fill the input.
+    const chipRow = document.createElement('div');
+    chipRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin-top:12px;';
+    const CHIPS = ['Funnier', 'Shorter (30s)', 'Punchier hook', 'More emotional'];
+    CHIPS.forEach(label => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.textContent = label;
+        chip.style.cssText = 'padding:6px 14px;border-radius:999px;font-size:13px;font-weight:600;cursor:pointer;border:1.5px solid #e0dcd5;background:#fff;color:#444;';
+        chip.addEventListener('click', () => {
+            input.value = label;
+            input.focus();
+        });
+        chipRow.appendChild(chip);
+    });
+    wrap.appendChild(chipRow);
+
+    const err = document.createElement('div');
+    err.className = 'remix-error';
+    err.style.cssText = 'color:#c2185b;font-size:13px;margin-top:8px;min-height:0;';
+    wrap.appendChild(err);
+
+    container.appendChild(wrap);
+
+    async function runRemix() {
+        const instruction = input.value.trim();
+        err.textContent = '';
+        if (!instruction) {
+            err.textContent = 'Type an instruction or tap a chip first.';
+            return;
+        }
+        if (!gateOrPaywall()) return;
+
+        const origLabel = remixBtn.textContent;
+        remixBtn.disabled = true;
+        input.disabled = true;
+        remixBtn.textContent = '\u23f3 Remixing\u2026';
+
+        // Compose the request: a leading directive line the model will follow,
+        // then the current flipped script it should transform. Keeping the
+        // instruction as line 1 also makes the auto-logged history title
+        // informative (e.g. "Remix: make it funnier \u2014 <script start>").
+        const composed = '[REMIX INSTRUCTION: ' + instruction + ']\n\n' + latest;
+
+        try {
+            const res = await fetch(REWRITE_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ script: composed, tone: 'viral', platform: null })
+            });
+            if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Remix failed'); }
+            const data = await res.json();
+            if (!data.rewritten) throw new Error('Remix returned nothing');
+
+            // Replace the flipped-version output in place; Original stays intact.
+            const flippedSection = container.querySelector('.remix-flipped-section');
+            const textEl = flippedSection && flippedSection.querySelector('.result-text');
+            if (textEl) {
+                textEl.textContent = data.rewritten;
+            } else {
+                // Fallback: if the section vanished, append a fresh one.
+                appendSection(container, '\u2728 Flipped Version', data.rewritten, true);
+                const fresh = container.lastElementChild;
+                if (fresh) fresh.classList.add('remix-flipped-section');
+            }
+
+            // Iterate on the newest version next time.
+            latest = data.rewritten;
+            recordFlipSuccess();
+        } catch (e) {
+            err.textContent = 'Error: ' + e.message;
+        } finally {
+            remixBtn.disabled = false;
+            input.disabled = false;
+            remixBtn.textContent = origLabel;
+        }
+    }
+
+    remixBtn.addEventListener('click', runRemix);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); runRemix(); }
+    });
 }
 
 // ── NICHE IDEAS ──────────────────────────────────────────
