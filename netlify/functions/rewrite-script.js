@@ -3,7 +3,8 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify Function: /rewrite-script
 //
 // Rewrites a user-supplied script via the Claude API for accurate,
-// contextual output. Returns { rewritten, hook, cta }.
+// contextual output. Returns { rewritten, hook, cta } plus optional
+// richer fields { scenes, caption, hashtags } when the model provides them.
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
@@ -74,7 +75,9 @@ exports.handler = __wrapErr( async function (event) {
 
     // ── Build prompts ────────────────────────────────────────
     const systemPrompt = [
-        'You are a short-form scriptwriter who rewrites scripts to be scroll-stopping and platform-native while preserving the creator\'s core message, voice, and factual content.',
+        'You are a short-form content director who rewrites scripts to be scroll-stopping and platform-native while preserving the creator\'s core message, voice, and factual content.',
+        'Beyond the rewrite, you break the script into concrete, shootable scenes — a beat-by-beat shot list with timestamps, on-screen visuals, and the exact spoken words for each beat — the way top viral-script tools do, so the creator can pick up their phone and film it directly.',
+        'You also write a ready-to-post, platform-native caption and a smart hashtag mix (a blend of broad, high-reach tags and specific, niche tags) tuned to how each platform actually surfaces content.',
         'You understand platform-specific norms: TikTok rewards raw energy and pattern-interrupts, Instagram Reels reward aesthetic + relatable moments, YouTube Shorts reward strong hooks and payoff, LinkedIn rewards specific insight + story, X/Threads reward sharp one-liners and threadable structure, Facebook rewards emotional storytelling.',
         'You always return output in the EXACT structured format the user requests. Do not add commentary, preamble, or markdown headers outside the requested format.',
         'ALWAYS produce a complete rewrite. If the input script is very short (a single hook, a CTA only, fragments under ~50 words), do NOT refuse. Extrapolate the topic from any signals available and write a confident, on-topic viral rewrite. Never reply with "not enough content to rewrite" or "I can\'t produce a quality output" — that\'s a failure mode. Always deliver SOMETHING the creator can post.',
@@ -120,6 +123,9 @@ exports.handler = __wrapErr( async function (event) {
         '- The HOOK must be 15 words or fewer, a true pattern-interrupt, specific (not generic), and create a curiosity gap.',
         '- The CTA must be a single sentence and fit the platform.',
         '- The REWRITTEN section is the full ready-to-record script (it can include the hook as its first line).',
+        '- The SCENES section is a shootable, beat-by-beat shot list. One numbered line per scene/beat. Each line starts with a timestamp range in square brackets, then describes what is ON SCREEN (the visual/shot) and what is SAID (the spoken words) for that beat. Cover the whole script from the hook shot to the payoff. Example line: "1. [0-3s] <hook shot: what\'s on screen + what\'s said>".',
+        '- The CAPTION section is a ready-to-post caption written natively for the platform, 1-3 short paragraphs. Do not put hashtags in the caption — they go in the HASHTAGS section.',
+        '- The HASHTAGS section is 8-15 relevant hashtags on a single line, space-separated, mixing broad high-reach tags with specific niche tags for the topic and platform.',
         '',
         'Return your response in EXACTLY this format, with the literal markers, and nothing else before or after:',
         '',
@@ -129,6 +135,14 @@ exports.handler = __wrapErr( async function (event) {
         '<single ≤15-word opening line here>',
         '===CTA===',
         '<single platform-appropriate call-to-action here>',
+        '===SCENES===',
+        '1. [0-3s] <hook shot: what\'s on screen + what\'s said>',
+        '2. [3-8s] <next beat>',
+        '<...one line per scene/beat, timestamps + visual + spoken>',
+        '===CAPTION===',
+        '<a ready-to-post caption for the platform, 1-3 short paragraphs>',
+        '===HASHTAGS===',
+        '<8-15 relevant hashtags, mix of broad + niche, space-separated>',
         '',
         'Here is the source script:',
         '<user_script>',
@@ -147,7 +161,7 @@ exports.handler = __wrapErr( async function (event) {
             },
             body: JSON.stringify({
                 model: 'claude-sonnet-4-6',
-                max_tokens: 1500,
+                max_tokens: 2000,
                 // Cache the large system prompt — ~75% input-token discount
                 // on repeat calls within 5min TTL.
                 system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
@@ -172,7 +186,15 @@ exports.handler = __wrapErr( async function (event) {
 
         const rewrittenMatch = text.match(/===REWRITTEN===\s*([\s\S]*?)\s*===HOOK===/i);
         const hookMatch = text.match(/===HOOK===\s*([\s\S]*?)\s*===CTA===/i);
-        const ctaMatch = text.match(/===CTA===\s*([\s\S]*?)\s*$/i);
+        // CTA ends at ===SCENES=== when the richer sections are present,
+        // otherwise runs to end-of-string (backward compatible).
+        const ctaMatch = text.match(/===CTA===\s*([\s\S]*?)\s*(?:===SCENES===|$)/i);
+
+        // New richer sections (all optional). Each stops at the next
+        // marker or end-of-string, so missing later sections don't break.
+        const scenesMatch = text.match(/===SCENES===\s*([\s\S]*?)\s*(?:===CAPTION===|===HASHTAGS===|$)/i);
+        const captionMatch = text.match(/===CAPTION===\s*([\s\S]*?)\s*(?:===HASHTAGS===|$)/i);
+        const hashtagsMatch = text.match(/===HASHTAGS===\s*([\s\S]*?)\s*$/i);
 
         if (rewrittenMatch && hookMatch && ctaMatch) {
             rewritten = rewrittenMatch[1].trim();
@@ -185,10 +207,29 @@ exports.handler = __wrapErr( async function (event) {
             cta = '';
         }
 
+        // Parse the optional richer sections. `scenes` is returned as an
+        // array of trimmed, non-empty lines (one per beat); `caption` and
+        // `hashtags` as strings. Omitted markers stay undefined.
+        let scenes;
+        if (scenesMatch) {
+            const scenesLines = scenesMatch[1]
+                .split('\n')
+                .map((line) => line.trim())
+                .filter((line) => line.length > 0);
+            if (scenesLines.length) scenes = scenesLines;
+        }
+        const caption = captionMatch ? captionMatch[1].trim() : undefined;
+        const hashtags = hashtagsMatch ? hashtagsMatch[1].trim() : undefined;
+
+        const responseBody = { rewritten, hook, cta };
+        if (scenes) responseBody.scenes = scenes;
+        if (caption) responseBody.caption = caption;
+        if (hashtags) responseBody.hashtags = hashtags;
+
         return {
             statusCode: 200,
             headers,
-            body: JSON.stringify({ rewritten, hook, cta })
+            body: JSON.stringify(responseBody)
         };
     } catch (err) {
         console.error('Rewrite-script error:', err?.message || err);
