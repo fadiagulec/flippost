@@ -98,10 +98,12 @@ function showPaywallModal(state, reason) {
         const stack = document.createElement('ul');
         stack.style.cssText = 'list-style:none;text-align:left;margin:0 auto 20px;max-width:360px;padding:0;';
         [
-            ['\u267E\uFE0F', '<strong>Unlimited flips</strong> \u2014 script rewrites, remixes, transcripts & scores (fair use)'],
-            ['\u{1F9F0}', '<strong>The full toolkit</strong> \u2014 download, watermark eraser, scene grabber, image prompts'],
-            ['\u{1F381}', '<strong>Creator Vault included</strong> \u2014 100 proven hooks by niche + posting playbook'],
-            ['\u{1F6E1}\uFE0F', '<strong>30-day guarantee</strong> \u2014 not for you? Full refund, no questions']
+            ['\u267E\uFE0F', '<strong>Unlimited</strong> flips, rewrites, remixes, transcripts &amp; scores (fair use)'],
+            ['\u2B07\uFE0F', '<strong>Download + clean any video</strong> \u2014 no watermarks, erase handles, grab scenes'],
+            ['\u26A1', '<strong>ViralScore + Brand Voice</strong> \u2014 score every post, flip it in your own voice'],
+            ['\u{1F3A8}', '<strong>Image &amp; video prompts + trending finder</strong> \u2014 the whole toolkit'],
+            ['\u{1F381}', '<strong>Creator Vault included</strong> \u2014 100 proven hooks + posting playbook'],
+            ['\u{1F6E1}\uFE0F', '<strong>30-day money-back guarantee</strong> \u2014 not for you? Full refund']
         ].forEach(([icon, html]) => {
             const li = document.createElement('li');
             li.style.cssText = 'display:flex;gap:10px;align-items:flex-start;margin-bottom:10px;font-size:14px;color:#444;line-height:1.45;';
