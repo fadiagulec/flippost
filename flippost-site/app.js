@@ -40,9 +40,8 @@ function recordFlipSuccess() {
 }
 
 // Single-tier pricing: $57 lifetime (anchored against $99), one-time, no subs.
-// Stripe link \u2014 still points to the $67 Stripe product. REPLACE with the
-// new $57 payment link from https://dashboard.stripe.com/payment-links so
-// what customers actually get charged matches the displayed price.
+// Stripe link VERIFIED 2026-07-05 to charge $57.00 for the "FlipIt Pro"
+// product (live checkout page confirmed). Price matches the UI everywhere.
 const STRIPE_LIFETIME_LINK = 'https://buy.stripe.com/28EcMY83I1XYd2i5r83Je0q';
 
 // `reason`: 'flip_cap' (default \u2014 used 3/day) | 'pro_feature' (clicked
