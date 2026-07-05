@@ -41,43 +41,52 @@
             margin-right: auto;
         }
 
-        /* ── PIPELINE TAB GROUPS ──────────────────────────────── */
-        /* Each group is a labeled column: a small uppercase label
-           above its buttons. Groups sit in the flex-wrap .tabs bar
-           and stack cleanly on narrow screens. */
-        .tab-group {
-            display: inline-flex;
-            flex-direction: column;
-            align-items: flex-start;
-            gap: 2px;
-        }
-        .tab-group-label {
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            color: #888;
-            padding: 0 6px;
-        }
-        .tab-group-btns {
-            display: inline-flex;
+        /* ── TWO-TIER NAV: 3 pages, each with its own tools ───── */
+        /* Top row: 3 big page buttons (Flip / Discover / Tools).
+           Below: only the active page's tool buttons are shown. */
+        .tabs { display: block; }
+        .page-nav {
+            display: flex;
+            justify-content: center;
+            gap: 8px;
             flex-wrap: wrap;
-            gap: 4px;
+            margin-bottom: 14px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid #e8e4de;
         }
-        /* Give the group container a soft separator so groups read
-           as distinct sections without heavy borders. */
-        .tab-group + .tab-group { position: relative; }
+        .page-btn {
+            background: #fff;
+            border: 1.5px solid #e0dcd5;
+            color: #555;
+            font-weight: 700;
+            font-size: 15px;
+            padding: 10px 24px;
+            border-radius: 999px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .page-btn:hover { border-color: #0d6e66; color: #0d6e66; }
+        .page-btn.active {
+            background: linear-gradient(135deg,#0d6e66,#0a9b8e);
+            color: #fff;
+            border-color: #0d6e66;
+        }
+        .tool-row {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 6px;
+            margin-bottom: 8px;
+        }
 
         @media (max-width: 768px) {
             .hero-headline { font-size: 22px; }
             .hero-subline { font-size: 15px; }
-            /* Stack groups full-width so the bar never overflows. */
-            .tabs { gap: 10px; }
-            .tab-group { width: 100%; }
-            .tab-group-btns { width: 100%; }
         }
         @media (max-width: 480px) {
             .hero-headline { font-size: 20px; }
+            .page-btn { flex: 1; min-width: 92px; padding: 10px 8px; font-size: 14px; }
+            .tool-row { gap: 5px; }
         }
     </style>
 </head>
@@ -91,45 +100,33 @@
     </header>
 
     <main class="container">
-        <!-- Tabs Navigation — grouped into pipeline sections.
-             Buttons keep class="tab-btn" + data-tab so switchTab and the
-             hash router work unchanged; grouping is purely presentational. -->
+        <!-- Two-tier navigation: 3 top-level PAGE buttons, each revealing
+             only its own tool buttons. Tool buttons keep class="tab-btn" +
+             data-tab so switchTab and the hash router work unchanged.
+             switchTab() reveals the correct page for whichever tab activates,
+             so cross-tab handoffs and #hash deep-links land on the right page. -->
         <div class="tabs">
-            <div class="tab-group">
-                <span class="tab-group-label">Find</span>
-                <div class="tab-group-btns">
-                    <button class="tab-btn" data-tab="trending-tab">🔥 Trending</button>
-                    <button class="tab-btn" data-tab="instagram-tab">📱 Instagram</button>
-                </div>
+            <div class="page-nav">
+                <button class="page-btn active" data-page="flip" type="button">✨ Flip</button>
+                <button class="page-btn" data-page="discover" type="button">🔎 Discover</button>
+                <button class="page-btn" data-page="tools" type="button">🧰 Tools</button>
             </div>
-            <div class="tab-group">
-                <span class="tab-group-label">Flip</span>
-                <div class="tab-group-btns">
-                    <button class="tab-btn active" data-tab="url-tab">📥 URL Extract</button>
-                    <button class="tab-btn" data-tab="script-tab">✍️ Script Rewrite</button>
-                    <button class="tab-btn" data-tab="transcribe-tab">🎙️ Transcribe</button>
-                </div>
+            <div class="tool-row" data-page-row="flip">
+                <button class="tab-btn active" data-tab="url-tab">📥 URL Extract</button>
+                <button class="tab-btn" data-tab="script-tab">✍️ Script Rewrite</button>
+                <button class="tab-btn" data-tab="transcribe-tab">🎙️ Transcribe</button>
+                <button class="tab-btn" data-tab="score-tab">⚡ ViralScore</button>
             </div>
-            <div class="tab-group">
-                <span class="tab-group-label">Create</span>
-                <div class="tab-group-btns">
-                    <button class="tab-btn" data-tab="imgprompt-tab">📸 Image Prompts</button>
-                    <button class="tab-btn" data-tab="ideas-tab">💡 Niche Ideas</button>
-                </div>
+            <div class="tool-row" data-page-row="discover" style="display:none;">
+                <button class="tab-btn" data-tab="trending-tab">🔥 Trending</button>
+                <button class="tab-btn" data-tab="instagram-tab">📱 Instagram</button>
+                <button class="tab-btn" data-tab="ideas-tab">💡 Niche Ideas</button>
             </div>
-            <div class="tab-group">
-                <span class="tab-group-label">Clean</span>
-                <div class="tab-group-btns">
-                    <button class="tab-btn" data-tab="eraser-tab">🎯 Eraser</button>
-                    <button class="tab-btn" data-tab="scenes-tab">🎞️ Scene Grabber</button>
-                </div>
-            </div>
-            <div class="tab-group">
-                <span class="tab-group-label">Check</span>
-                <div class="tab-group-btns">
-                    <button class="tab-btn" data-tab="score-tab">⚡ ViralScore</button>
-                    <button class="tab-btn" data-tab="history-tab">🕘 History</button>
-                </div>
+            <div class="tool-row" data-page-row="tools" style="display:none;">
+                <button class="tab-btn" data-tab="imgprompt-tab">📸 Image Prompts</button>
+                <button class="tab-btn" data-tab="eraser-tab">🎯 Eraser</button>
+                <button class="tab-btn" data-tab="scenes-tab">🎞️ Scene Grabber</button>
+                <button class="tab-btn" data-tab="history-tab">🕘 History</button>
             </div>
         </div>
 
@@ -499,6 +496,6 @@
 
     <script src="access.js"></script>
     <!-- Cache-bust the JS so users always get the latest eraser logic. -->
-    <script src="app.js?v=dl2"></script>
+    <script src="app.js?v=3pages1"></script>
 </body>
 </html>

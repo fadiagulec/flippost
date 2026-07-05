@@ -231,9 +231,43 @@ function switchTab(tabName) {
     document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.remove('active');
     });
-    document.getElementById(tabName).classList.add('active');
-    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+    const content = document.getElementById(tabName);
+    if (content) content.classList.add('active');
+    const btn = document.querySelector(`[data-tab="${tabName}"]`);
+    if (btn) btn.classList.add('active');
+    // Two-tier nav: reveal the top-level page that owns this tab, so every
+    // path here — tab click, page button, #hash deep-link, or a cross-tab
+    // handoff like "Flip This" → url-tab — lands the user on the right page.
+    revealPageForTab(tabName);
 }
+
+// Maps each tool tab to its top-level page (Flip / Discover / Tools).
+const TAB_TO_PAGE = {
+    'url-tab': 'flip', 'script-tab': 'flip', 'transcribe-tab': 'flip', 'score-tab': 'flip',
+    'trending-tab': 'discover', 'instagram-tab': 'discover', 'ideas-tab': 'discover',
+    'imgprompt-tab': 'tools', 'eraser-tab': 'tools', 'scenes-tab': 'tools', 'history-tab': 'tools'
+};
+function revealPageForTab(tabName) {
+    const page = TAB_TO_PAGE[tabName];
+    if (!page) return;
+    document.querySelectorAll('.tool-row').forEach(row => {
+        row.style.display = row.getAttribute('data-page-row') === page ? '' : 'none';
+    });
+    document.querySelectorAll('.page-btn').forEach(pb => {
+        pb.classList.toggle('active', pb.getAttribute('data-page') === page);
+    });
+}
+
+// Page buttons: clicking a page shows its tools and jumps to its first tool.
+// We .click() the first tool button (rather than calling switchTab directly)
+// so it also fires the hash-router listener and keeps the URL in sync.
+document.querySelectorAll('.page-btn').forEach(pb => {
+    pb.addEventListener('click', () => {
+        const page = pb.getAttribute('data-page');
+        const firstTab = document.querySelector(`.tool-row[data-page-row="${page}"] .tab-btn`);
+        if (firstTab) firstTab.click();
+    });
+});
 
 // Detect platform from URL
 function detectPlatform(url) {
