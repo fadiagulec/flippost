@@ -663,6 +663,110 @@ def transcribe_video():
         })
 
 
+@app.route('/transcribe-url', methods=['POST', 'OPTIONS'])
+def transcribe_url():
+    """Transcribe a video FROM A URL — no upload. yt-dlp downloads just the
+    audio (server-side), then Whisper transcribes it. This avoids the browser
+    upload entirely, so it works for full-length videos of any size and on
+    networks that can't push big uploads. Same reliability as /download
+    (TikTok/YouTube via yt-dlp; Instagram needs INSTAGRAM_COOKIES_B64).
+
+    Request:  { url }
+    Returns:  { success, transcript, segments, duration, language }
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    openai_key = os.environ.get('OPENAI_API_KEY')
+    if not openai_key:
+        return jsonify({'error': 'Transcription not configured (missing OPENAI_API_KEY).'}), 503
+
+    data = request.get_json(silent=True) or {}
+    url = (data.get('url') or '').strip()
+    if not url or not url.startswith(('http://', 'https://')):
+        return jsonify({'error': 'Paste a valid video URL.'}), 400
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_tmpl = os.path.join(tmpdir, 'audio.%(ext)s')
+
+        def run_ytdlp(extra_args=[]):
+            # -x extracts audio only → small mp3, fast Whisper upload.
+            cmd = [
+                'yt-dlp', '--no-playlist', '--max-filesize', '80m',
+                '--socket-timeout', '30',
+                '-x', '--audio-format', 'mp3', '--audio-quality', '5',
+                '--output', out_tmpl,
+                '--add-header', 'User-Agent:Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+            ] + extra_args + [url]
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+
+        result = run_ytdlp()
+
+        # Instagram fallback with cookies, mirroring /download.
+        if result.returncode != 0 and 'instagram' in url.lower():
+            cookies_b64 = os.environ.get('INSTAGRAM_COOKIES_B64', '')
+            if cookies_b64:
+                try:
+                    cookies_path = os.path.join(tmpdir, 'cookies.txt')
+                    with open(cookies_path, 'wb') as f:
+                        f.write(base64.b64decode(cookies_b64))
+                    result = run_ytdlp(['--cookies', cookies_path])
+                except Exception:
+                    pass
+
+        if result.returncode != 0:
+            err = (result.stderr or '')[-300:] or 'Download failed'
+            if 'login' in err.lower() or 'authentication' in err.lower():
+                return jsonify({'error': 'That link needs login (e.g. private Instagram). Try a public TikTok/YouTube link.'}), 400
+            return jsonify({'error': 'Could not fetch that video. It may be private, region-locked, or unsupported.'}), 400
+
+        audio_files = glob.glob(os.path.join(tmpdir, 'audio.*'))
+        audio_files = [f for f in audio_files if f.endswith('.mp3')] or audio_files
+        if not audio_files:
+            return jsonify({'error': 'No audio could be extracted from that link.'}), 400
+        audio_path = audio_files[0]
+
+        if os.path.getsize(audio_path) < 128:
+            return jsonify({'error': 'No audio track found in that video.'}), 400
+        if os.path.getsize(audio_path) > 24 * 1024 * 1024:
+            return jsonify({'error': 'Audio too long for one pass — try a shorter video.'}), 413
+
+        try:
+            import requests as _req
+        except ImportError:
+            return jsonify({'error': 'requests not installed'}), 500
+
+        try:
+            with open(audio_path, 'rb') as af:
+                resp = _req.post(
+                    'https://api.openai.com/v1/audio/transcriptions',
+                    headers={'Authorization': f'Bearer {openai_key}'},
+                    files={'file': ('audio.mp3', af, 'audio/mpeg')},
+                    data={'model': 'whisper-1', 'response_format': 'verbose_json'},
+                    timeout=120
+                )
+        except Exception as e:
+            return jsonify({'error': f'Whisper call failed: {e}'}), 502
+
+        if resp.status_code != 200:
+            print(f'[transcribe-url] whisper rc={resp.status_code} body={resp.text[:300]}', flush=True)
+            return jsonify({'error': 'Whisper API returned an error.', 'detail': resp.text[:300]}), 502
+
+        result_j = resp.json()
+        segments = [{
+            'start': float(s.get('start', 0)),
+            'end':   float(s.get('end', 0)),
+            'text':  str(s.get('text', '')).strip()
+        } for s in (result_j.get('segments') or [])]
+        return jsonify({
+            'success': True,
+            'transcript': (result_j.get('text') or '').strip(),
+            'segments': segments,
+            'duration': float(result_j.get('duration') or 0),
+            'language': result_j.get('language') or ''
+        })
+
+
 @app.route('/extract-scenes', methods=['POST', 'OPTIONS'])
 def extract_scenes():
     """Extract distinct scene-change frames from a video using ffmpeg's

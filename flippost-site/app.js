@@ -3697,6 +3697,46 @@ function showSuccess(msg, id) {
         const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         handleFile(f);
     });
+
+    // Paste-a-link transcribe: server downloads the audio + runs Whisper, so
+    // there's no upload and no size limit. Tiny request → direct to Railway
+    // (90s window for the download+transcribe), Netlify proxy as fallback.
+    const urlInput = document.getElementById('transcribeUrl');
+    const urlBtn = document.getElementById('transcribeUrlBtn');
+    if (urlBtn && urlInput) {
+        const runUrl = async () => {
+            const link = urlInput.value.trim();
+            if (!/^https?:\/\//i.test(link)) {
+                setStatus('Paste a valid video link (TikTok, YouTube, Instagram).', false);
+                return;
+            }
+            if (typeof gateOrPaywall === 'function' && !gateOrPaywall()) return;
+            urlBtn.disabled = true;
+            const orig = urlBtn.textContent;
+            urlBtn.textContent = '⏳ Downloading + transcribing…';
+            setStatus('⏳ Fetching audio + transcribing (10–40s)…', null);
+            try {
+                const data = await postHeavyJob(
+                    '/transcribe-url',
+                    '/.netlify/functions/transcribe-url',
+                    { url: link }
+                );
+                if (!data.success || !data.transcript) {
+                    throw new Error(data.error || 'No transcript returned.');
+                }
+                setStatus(`✅ Transcribed ${Math.round(data.duration || 0)}s of ${data.language || 'audio'}.`, true);
+                renderTranscript(data);
+            } catch (err) {
+                console.error('Transcribe-url failed:', err);
+                setStatus('❌ ' + (err.message || 'Could not transcribe that link.'), false);
+            } finally {
+                urlBtn.disabled = false;
+                urlBtn.textContent = orig;
+            }
+        };
+        urlBtn.addEventListener('click', runUrl);
+        urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runUrl(); });
+    }
 })();
 
 // ── HEAVY VIDEO JOB TRANSPORT ─────────────────────────────────────
