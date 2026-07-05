@@ -110,3 +110,4 @@ function constantTimeEq(a, b) {
     if (ab.length !== bb.length) return false;
     return crypto.timingSafeEqual(ab, bb);
 }
+
