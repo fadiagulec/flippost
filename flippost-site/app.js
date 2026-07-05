@@ -3525,9 +3525,9 @@ function showSuccess(msg, id) {
 })();
 
 // ── TRANSCRIBE (Whisper) ──────────────────────────────────────────
-// Uploads a video, calls /transcribe-video (Railway → OpenAI Whisper),
-// shows the full spoken transcript + timestamped segments. Includes
-// Copy + Flip This Script buttons for one-click handoff to Rewrite.
+// Uploads a short video straight to OpenAI Whisper via the Netlify
+// /whisper-transcribe function (no Railway/ffmpeg). Shows the full spoken
+// transcript + timestamped segments, with Copy + Flip This Script buttons.
 (function transcribeModule() {
     const fileInput = document.getElementById('transcribeFile');
     const drop = document.getElementById('transcribeDrop');
@@ -3535,7 +3535,11 @@ function showSuccess(msg, id) {
     const results = document.getElementById('transcribeResultsContainer');
     if (!fileInput || !drop || !status || !results) return;
 
-    const MAX_BYTES = 18 * 1024 * 1024;
+    // Transcribe now goes straight to OpenAI Whisper through a Netlify
+    // function (no Railway). Netlify caps the request body at ~6MB, so the
+    // video must be under ~4.4MB. Whisper reads the audio from the video
+    // itself, so a short clip is all we need.
+    const MAX_BYTES = 4.4 * 1024 * 1024;
 
     function setStatus(msg, ok) {
         status.textContent = msg || '';
@@ -3556,7 +3560,7 @@ function showSuccess(msg, id) {
             return;
         }
         if (file.size > MAX_BYTES) {
-            setStatus(`File is ${(file.size/1048576).toFixed(1)} MB — please use one under 18 MB.`, false);
+            setStatus(`That clip is ${(file.size/1048576).toFixed(1)} MB — Transcribe needs one under ~4 MB for now. Use a shorter section or a lower-res export.`, false);
             return;
         }
         if (typeof gateOrPaywall === 'function' && !gateOrPaywall()) return;
@@ -3572,14 +3576,16 @@ function showSuccess(msg, id) {
             }
             const rawBase64 = btoa(binStr);
 
-            setStatus('⏳ Extracting audio + transcribing (Whisper, 5–20s)…', null);
-            const data = await postHeavyJob(
-                '/transcribe-video',
-                '/.netlify/functions/transcribe-video',
-                { videoData: rawBase64 }
-            );
-            if (!data.success || !data.transcript) {
-                throw new Error(data.error || 'No transcript returned.');
+            setStatus('⏳ Transcribing with Whisper (5–20s)…', null);
+            // Straight to OpenAI Whisper via Netlify — no Railway dependency.
+            const resp = await fetch('/.netlify/functions/whisper-transcribe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoData: rawBase64, mime: file.type || 'video/mp4' })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.success || !data.transcript) {
+                throw new Error(data.error || ('Server returned ' + resp.status));
             }
             setStatus(`✅ Transcribed ${Math.round(data.duration || 0)}s of ${data.language || 'audio'}.`, true);
             renderTranscript(data);
