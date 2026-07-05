@@ -3522,6 +3522,48 @@ function showSuccess(msg, id) {
         const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
         handleFile(f);
     });
+
+    // Paste-a-link scene grab: server downloads the video + pulls scenes, so
+    // there's no upload and no size limit. Tiny request → direct to Railway
+    // (90s window for download+ffmpeg), Netlify proxy as fallback.
+    const urlInput = document.getElementById('scenesUrl');
+    const urlBtn = document.getElementById('scenesUrlBtn');
+    if (urlBtn && urlInput) {
+        const runUrl = async () => {
+            const link = urlInput.value.trim();
+            if (!/^https?:\/\//i.test(link)) {
+                setStatus('Paste a valid video link (TikTok, YouTube, Instagram).', false);
+                return;
+            }
+            if (typeof gateOrPaywall === 'function' && !gateOrPaywall()) return;
+            urlBtn.disabled = true;
+            const orig = urlBtn.textContent;
+            urlBtn.textContent = '⏳ Downloading + grabbing scenes…';
+            setStatus('⏳ Fetching video + detecting scenes (10–40s)…', null);
+            try {
+                const data = await postHeavyJob(
+                    '/extract-scenes-url',
+                    '/.netlify/functions/extract-scenes-url',
+                    { url: link }
+                );
+                if (!data.success || !Array.isArray(data.scenes) || data.scenes.length === 0) {
+                    throw new Error(data.error || 'No scenes detected.');
+                }
+                const note = data.truncated ? ` (showing first ${data.count} of ${data.detected})` : '';
+                setStatus(`✅ Found ${data.count} scene${data.count === 1 ? '' : 's'}${note}.`, true);
+                const base = (link.split('/').filter(Boolean).pop() || 'flipit-scenes').replace(/[^a-z0-9]+/gi, '-').slice(0, 40);
+                renderScenes(data.scenes, base);
+            } catch (err) {
+                console.error('Scenes-url failed:', err);
+                setStatus('❌ ' + (err.message || 'Could not grab scenes from that link.'), false);
+            } finally {
+                urlBtn.disabled = false;
+                urlBtn.textContent = orig;
+            }
+        };
+        urlBtn.addEventListener('click', runUrl);
+        urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runUrl(); });
+    }
 })();
 
 // ── TRANSCRIBE (Whisper) ──────────────────────────────────────────

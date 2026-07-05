@@ -870,6 +870,105 @@ def extract_scenes():
         })
 
 
+def _scenes_from_file(in_path):
+    """Run ffmpeg scene detection on a local video file and return the same
+    JSON payload shape as /extract-scenes. Shared by the upload and URL
+    endpoints."""
+    tmpdir = os.path.dirname(in_path)
+    scene_filter = (
+        "select='eq(n\\,0)+gt(scene\\,0.35)',"
+        "scale=720:720:force_original_aspect_ratio=decrease"
+    )
+    cmd = [
+        'ffmpeg', '-y', '-i', in_path,
+        '-vf', scene_filter, '-vsync', 'vfr',
+        '-frames:v', '15', '-q:v', '5',
+        os.path.join(tmpdir, 'scene_%03d.jpg')
+    ]
+    ff = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    if ff.returncode != 0:
+        print(f'[scenes] ffmpeg failed rc={ff.returncode} stderr={(ff.stderr or "")[-300:]}', flush=True)
+        return None
+    BUDGET = int(4.5 * 1024 * 1024)
+    scenes, detected, used = [], 0, 0
+    for name in sorted(os.listdir(tmpdir)):
+        if not name.startswith('scene_') or not name.endswith('.jpg'):
+            continue
+        path = os.path.join(tmpdir, name)
+        size = os.path.getsize(path)
+        if size < 512:
+            continue
+        detected += 1
+        with open(path, 'rb') as f:
+            b64 = base64.b64encode(f.read()).decode('utf-8')
+        if used + len(b64) > BUDGET:
+            continue
+        used += len(b64)
+        scenes.append({'index': len(scenes) + 1, 'base64': b64, 'size_bytes': size})
+    if not scenes:
+        return None
+    return {'success': True, 'scenes': scenes, 'count': len(scenes),
+            'detected': detected, 'truncated': detected > len(scenes)}
+
+
+@app.route('/extract-scenes-url', methods=['POST', 'OPTIONS'])
+def extract_scenes_url():
+    """Scene Grabber FROM A URL — no upload. yt-dlp downloads the video
+    server-side, then ffmpeg pulls one frame per scene change. Same as
+    /extract-scenes but the browser only sends a link.
+
+    Request: { url }  →  { success, scenes, count, detected, truncated }
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json(silent=True) or {}
+    url = (data.get('url') or '').strip()
+    if not url or not url.startswith(('http://', 'https://')):
+        return jsonify({'error': 'Paste a valid video URL.'}), 400
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_tmpl = os.path.join(tmpdir, 'src.%(ext)s')
+
+        def run_ytdlp(extra_args=[]):
+            cmd = [
+                'yt-dlp', '--no-playlist', '--max-filesize', '80m',
+                '--socket-timeout', '30', '--output', out_tmpl,
+                '--add-header', 'User-Agent:Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+            ] + extra_args + [url]
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+
+        result = run_ytdlp()
+        if result.returncode != 0 and 'instagram' in url.lower():
+            cookies_b64 = os.environ.get('INSTAGRAM_COOKIES_B64', '')
+            if cookies_b64:
+                try:
+                    cookies_path = os.path.join(tmpdir, 'cookies.txt')
+                    with open(cookies_path, 'wb') as f:
+                        f.write(base64.b64decode(cookies_b64))
+                    result = run_ytdlp(['--cookies', cookies_path])
+                except Exception:
+                    pass
+
+        if result.returncode != 0:
+            err = (result.stderr or '')[-300:]
+            if 'login' in err.lower() or 'authentication' in err.lower():
+                return jsonify({'error': 'That link needs login (e.g. private Instagram). Try a public TikTok/YouTube link.'}), 400
+            return jsonify({'error': 'Could not fetch that video. It may be private, region-locked, or unsupported.'}), 400
+
+        files = glob.glob(os.path.join(tmpdir, 'src.*'))
+        if not files:
+            return jsonify({'error': 'No video downloaded from that link.'}), 400
+
+        try:
+            payload = _scenes_from_file(files[0])
+        except subprocess.TimeoutExpired:
+            return jsonify({'error': 'Processing timed out — try a shorter video.'}), 408
+        if not payload:
+            return jsonify({'error': 'No distinct scenes detected — try a video with more visual changes.'}), 500
+        return jsonify(payload)
+
+
 @app.route('/erase-region-image', methods=['POST', 'OPTIONS'])
 def erase_region_image():
     """Image counterpart to /erase-region. Same input shape, same delogo
