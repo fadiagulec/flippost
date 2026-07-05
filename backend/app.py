@@ -767,6 +767,80 @@ def transcribe_url():
         })
 
 
+def _scenes_from_video_file(in_path, tmpdir):
+    """Run ffmpeg's scene detector on a video file already on disk and collect
+    up to 15 JPEG frames as base64, staying under Netlify's 6MB response cap.
+    Returns (payload_dict, status_code) — callers jsonify it. Shared by
+    /extract-scenes (base64 upload) and /extract-scenes-url (server download).
+
+    Scene filter breakdown:
+      - select='eq(n\\,0)+gt(scene\\,0.35)' — grab frame 0 AND any frame whose
+        scene-change score exceeds 0.35 (balanced; higher = fewer frames).
+      - Commas inside filter expressions must be escaped as \\,
+      - 720px longest side + q:v 5: the response travels back through a Netlify
+        Function which hard-caps response bodies at 6MB. 15 1080px frames blew
+        that cap and Netlify returned a plain-text error that broke JSON parse.
+    """
+    scene_filter = (
+        "select='eq(n\\,0)+gt(scene\\,0.35)',"
+        "scale=720:720:force_original_aspect_ratio=decrease"
+    )
+    cmd = [
+        'ffmpeg', '-y', '-i', in_path,
+        '-vf', scene_filter,
+        '-vsync', 'vfr',
+        '-frames:v', '15',
+        '-q:v', '5',
+        os.path.join(tmpdir, 'scene_%03d.jpg')
+    ]
+    try:
+        ff = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if ff.returncode != 0:
+            print(f'[extract-scenes] ffmpeg failed rc={ff.returncode} stderr={(ff.stderr or "")[-300:]}', flush=True)
+            return {'error': 'ffmpeg failed', 'detail': (ff.stderr or '')[-300:]}, 500
+    except FileNotFoundError:
+        return {'error': 'ffmpeg not installed'}, 500
+    except subprocess.TimeoutExpired:
+        return {'error': 'Processing timed out (try a shorter clip)'}, 408
+
+    # Byte budget: total base64 must stay comfortably under Netlify's 6MB
+    # response cap (JSON overhead + headers included). Stop adding scenes once
+    # we hit ~4.5MB and tell the client how many we dropped.
+    BUDGET = int(4.5 * 1024 * 1024)
+    scenes = []
+    detected = 0
+    used = 0
+    for name in sorted(os.listdir(tmpdir)):
+        if not name.startswith('scene_') or not name.endswith('.jpg'):
+            continue
+        path = os.path.join(tmpdir, name)
+        size = os.path.getsize(path)
+        if size < 512:
+            continue
+        detected += 1
+        with open(path, 'rb') as f:
+            b64 = base64.b64encode(f.read()).decode('utf-8')
+        if used + len(b64) > BUDGET:
+            continue  # keep counting `detected`, skip payload
+        used += len(b64)
+        scenes.append({
+            'index': len(scenes) + 1,
+            'base64': b64,
+            'size_bytes': size
+        })
+
+    if not scenes:
+        return {'error': 'No distinct scenes detected — try a video with more visual changes.'}, 500
+
+    return {
+        'success': True,
+        'scenes': scenes,
+        'count': len(scenes),
+        'detected': detected,
+        'truncated': detected > len(scenes)
+    }, 200
+
+
 @app.route('/extract-scenes', methods=['POST', 'OPTIONS'])
 def extract_scenes():
     """Extract distinct scene-change frames from a video using ffmpeg's
@@ -801,73 +875,70 @@ def extract_scenes():
         with open(in_path, 'wb') as f:
             f.write(video_bytes)
 
-        # Scene filter breakdown:
-        #  - select='eq(n\,0)+gt(scene\,0.35)' — grab frame 0 AND any frame
-        #    whose scene-change score exceeds 0.35 (balanced sensitivity —
-        #    higher = fewer frames, lower = more).
-        #  - Commas inside filter expressions must be escaped as \,
-        #  - 720px longest side + q:v 5: this response travels back through a
-        #    Netlify Function which hard-caps response bodies at 6MB. 15
-        #    1080px frames blew that cap and Netlify returned a plain-text
-        #    "Internal Error" that broke the frontend's JSON parse.
-        scene_filter = (
-            "select='eq(n\\,0)+gt(scene\\,0.35)',"
-            "scale=720:720:force_original_aspect_ratio=decrease"
-        )
-        cmd = [
-            'ffmpeg', '-y', '-i', in_path,
-            '-vf', scene_filter,
-            '-vsync', 'vfr',
-            '-frames:v', '15',
-            '-q:v', '5',
-            os.path.join(tmpdir, 'scene_%03d.jpg')
-        ]
-        try:
-            ff = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            if ff.returncode != 0:
-                print(f'[extract-scenes] ffmpeg failed rc={ff.returncode} stderr={(ff.stderr or "")[-300:]}', flush=True)
-                return jsonify({'error': 'ffmpeg failed', 'detail': (ff.stderr or '')[-300:]}), 500
-        except FileNotFoundError:
-            return jsonify({'error': 'ffmpeg not installed'}), 500
-        except subprocess.TimeoutExpired:
-            return jsonify({'error': 'Processing timed out (try a shorter clip)'}), 408
+        payload, code = _scenes_from_video_file(in_path, tmpdir)
+        return jsonify(payload), code
 
-        # Byte budget: total base64 must stay comfortably under Netlify's
-        # 6MB response cap (JSON overhead + headers included). Stop adding
-        # scenes once we hit ~4.5MB and tell the client how many we dropped.
-        BUDGET = int(4.5 * 1024 * 1024)
-        scenes = []
-        detected = 0
-        used = 0
-        for name in sorted(os.listdir(tmpdir)):
-            if not name.startswith('scene_') or not name.endswith('.jpg'):
-                continue
-            path = os.path.join(tmpdir, name)
-            size = os.path.getsize(path)
-            if size < 512:
-                continue
-            detected += 1
-            with open(path, 'rb') as f:
-                b64 = base64.b64encode(f.read()).decode('utf-8')
-            if used + len(b64) > BUDGET:
-                continue  # keep counting `detected`, skip payload
-            used += len(b64)
-            scenes.append({
-                'index': len(scenes) + 1,
-                'base64': b64,
-                'size_bytes': size
-            })
 
-        if not scenes:
-            return jsonify({'error': 'No distinct scenes detected — try a video with more visual changes.'}), 500
+@app.route('/extract-scenes-url', methods=['POST', 'OPTIONS'])
+def extract_scenes_url():
+    """Extract scene-change frames FROM A URL — no upload. yt-dlp downloads the
+    video (server-side), then ffmpeg pulls one JPEG per visual beat. This avoids
+    the browser upload entirely, so it works for full-length videos of any size
+    and on networks that can't push big uploads. Same reliability as /download
+    (TikTok/YouTube via yt-dlp; Instagram needs INSTAGRAM_COOKIES_B64).
 
-        return jsonify({
-            'success': True,
-            'scenes': scenes,
-            'count': len(scenes),
-            'detected': detected,
-            'truncated': detected > len(scenes)
-        })
+    Request:  { url }
+    Returns:  { success, scenes, count, detected, truncated }
+    """
+    if request.method == 'OPTIONS':
+        return '', 200
+
+    data = request.get_json(silent=True) or {}
+    url = (data.get('url') or '').strip()
+    if not url or not url.startswith(('http://', 'https://')):
+        return jsonify({'error': 'Paste a valid video URL.'}), 400
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out_tmpl = os.path.join(tmpdir, 'video.%(ext)s')
+
+        def run_ytdlp(extra_args=[]):
+            cmd = [
+                'yt-dlp', '--no-playlist', '--max-filesize', '80m',
+                '--socket-timeout', '30',
+                '--output', out_tmpl,
+                '--add-header', 'User-Agent:Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+            ] + extra_args + [url]
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+
+        result = run_ytdlp()
+
+        # Instagram fallback with cookies, mirroring /download and /transcribe-url.
+        if result.returncode != 0 and 'instagram' in url.lower():
+            cookies_b64 = os.environ.get('INSTAGRAM_COOKIES_B64', '')
+            if cookies_b64:
+                try:
+                    cookies_path = os.path.join(tmpdir, 'cookies.txt')
+                    with open(cookies_path, 'wb') as f:
+                        f.write(base64.b64decode(cookies_b64))
+                    result = run_ytdlp(['--cookies', cookies_path])
+                except Exception:
+                    pass
+
+        if result.returncode != 0:
+            err = (result.stderr or '')[-300:] or 'Download failed'
+            if 'login' in err.lower() or 'authentication' in err.lower():
+                return jsonify({'error': 'That link needs login (e.g. private Instagram). Try a public TikTok/YouTube link.'}), 400
+            return jsonify({'error': 'Could not fetch that video. It may be private, region-locked, or unsupported.'}), 400
+
+        files = glob.glob(os.path.join(tmpdir, 'video.*'))
+        if not files:
+            return jsonify({'error': 'No video could be downloaded from that link.'}), 400
+        in_path = files[0]
+        if os.path.getsize(in_path) < 1024:
+            return jsonify({'error': 'Downloaded video was empty.'}), 400
+
+        payload, code = _scenes_from_video_file(in_path, tmpdir)
+        return jsonify(payload), code
 
 
 @app.route('/erase-region-image', methods=['POST', 'OPTIONS'])
