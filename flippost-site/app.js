@@ -3410,10 +3410,11 @@ function showSuccess(msg, id) {
             const baseName = (file.name || 'flipit-scenes').replace(/\.[a-z0-9]{2,4}$/i, '');
 
             setStatus('⏳ Detecting scene changes (5–15s, normal)…', null);
+            const modeSel = document.getElementById('scenesMode');
             const data = await postHeavyJob(
                 '/extract-scenes',
                 '/.netlify/functions/extract-scenes',
-                { videoData: rawBase64 }
+                { videoData: rawBase64, mode: (modeSel && modeSel.value) || 'scene' }
             );
             if (!data.success || !Array.isArray(data.scenes) || data.scenes.length === 0) {
                 throw new Error(data.error || 'No scenes detected.');
@@ -3541,10 +3542,11 @@ function showSuccess(msg, id) {
             urlBtn.textContent = '⏳ Downloading + grabbing scenes…';
             setStatus('⏳ Fetching video + detecting scenes (10–40s)…', null);
             try {
+                const modeSel = document.getElementById('scenesMode');
                 const data = await postHeavyJob(
                     '/extract-scenes-url',
                     '/.netlify/functions/extract-scenes-url',
-                    { url: link }
+                    { url: link, mode: (modeSel && modeSel.value) || 'scene' }
                 );
                 if (!data.success || !Array.isArray(data.scenes) || data.scenes.length === 0) {
                     throw new Error(data.error || 'No scenes detected.');

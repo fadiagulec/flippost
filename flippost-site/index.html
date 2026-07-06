@@ -430,6 +430,16 @@
                     </p>
                 </div>
 
+                <div class="input-group" style="margin-bottom:14px;">
+                    <label for="scenesMode" style="font-size:13px;font-weight:600;color:#444;">What to grab</label>
+                    <select id="scenesMode">
+                        <option value="scene">🎬 Scene changes — big visual shifts (default)</option>
+                        <option value="sensitive">✨ Every overlay — catch caption/text changes too</option>
+                        <option value="interval">⏱️ Every 2 seconds — even timeline (best for talking-heads)</option>
+                    </select>
+                    <div style="margin-top:4px;font-size:12px;color:#888;">Only got a few frames? Try <strong>Every overlay</strong> or <strong>Every 2 seconds</strong>.</div>
+                </div>
+
                 <!-- Paste-a-link: server downloads + grabs scenes, no upload, any size. -->
                 <div style="background:#faf8f5;border:1px solid #e8e4de;border-radius:12px;padding:14px;margin-bottom:14px;">
                     <div style="font-weight:700;color:#1a1a2e;font-size:14px;margin-bottom:8px;">🔗 Paste a video link (recommended — works for any size)</div>
@@ -518,6 +528,6 @@
 
     <script src="access.js"></script>
     <!-- Cache-bust the JS so users always get the latest eraser logic. -->
-    <script src="app.js?v=scenesurl1"></script>
+    <script src="app.js?v=scenemode1"></script>
 </body>
 </html>

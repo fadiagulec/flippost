@@ -801,88 +801,43 @@ def extract_scenes():
         with open(in_path, 'wb') as f:
             f.write(video_bytes)
 
-        # Scene filter breakdown:
-        #  - select='eq(n\,0)+gt(scene\,0.35)' — grab frame 0 AND any frame
-        #    whose scene-change score exceeds 0.35 (balanced sensitivity —
-        #    higher = fewer frames, lower = more).
-        #  - Commas inside filter expressions must be escaped as \,
-        #  - 720px longest side + q:v 5: this response travels back through a
-        #    Netlify Function which hard-caps response bodies at 6MB. 15
-        #    1080px frames blew that cap and Netlify returned a plain-text
-        #    "Internal Error" that broke the frontend's JSON parse.
-        scene_filter = (
-            "select='eq(n\\,0)+gt(scene\\,0.35)',"
-            "scale=720:720:force_original_aspect_ratio=decrease"
-        )
-        cmd = [
-            'ffmpeg', '-y', '-i', in_path,
-            '-vf', scene_filter,
-            '-vsync', 'vfr',
-            '-frames:v', '15',
-            '-q:v', '5',
-            os.path.join(tmpdir, 'scene_%03d.jpg')
-        ]
+        mode = data.get('mode') if data.get('mode') in ('scene', 'sensitive', 'interval') else 'scene'
         try:
-            ff = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            if ff.returncode != 0:
-                print(f'[extract-scenes] ffmpeg failed rc={ff.returncode} stderr={(ff.stderr or "")[-300:]}', flush=True)
-                return jsonify({'error': 'ffmpeg failed', 'detail': (ff.stderr or '')[-300:]}), 500
+            payload = _scenes_from_file(in_path, mode)
         except FileNotFoundError:
             return jsonify({'error': 'ffmpeg not installed'}), 500
         except subprocess.TimeoutExpired:
             return jsonify({'error': 'Processing timed out (try a shorter clip)'}), 408
-
-        # Byte budget: total base64 must stay comfortably under Netlify's
-        # 6MB response cap (JSON overhead + headers included). Stop adding
-        # scenes once we hit ~4.5MB and tell the client how many we dropped.
-        BUDGET = int(4.5 * 1024 * 1024)
-        scenes = []
-        detected = 0
-        used = 0
-        for name in sorted(os.listdir(tmpdir)):
-            if not name.startswith('scene_') or not name.endswith('.jpg'):
-                continue
-            path = os.path.join(tmpdir, name)
-            size = os.path.getsize(path)
-            if size < 512:
-                continue
-            detected += 1
-            with open(path, 'rb') as f:
-                b64 = base64.b64encode(f.read()).decode('utf-8')
-            if used + len(b64) > BUDGET:
-                continue  # keep counting `detected`, skip payload
-            used += len(b64)
-            scenes.append({
-                'index': len(scenes) + 1,
-                'base64': b64,
-                'size_bytes': size
-            })
-
-        if not scenes:
+        if not payload:
             return jsonify({'error': 'No distinct scenes detected — try a video with more visual changes.'}), 500
-
-        return jsonify({
-            'success': True,
-            'scenes': scenes,
-            'count': len(scenes),
-            'detected': detected,
-            'truncated': detected > len(scenes)
-        })
+        return jsonify(payload)
 
 
-def _scenes_from_file(in_path):
-    """Run ffmpeg scene detection on a local video file and return the same
+def _scenes_from_file(in_path, mode='scene'):
+    """Run ffmpeg frame extraction on a local video file and return the same
     JSON payload shape as /extract-scenes. Shared by the upload and URL
-    endpoints."""
+    endpoints. `mode` controls WHICH frames are grabbed:
+      'scene'     — big visual changes only (default; talking-head pose shifts)
+      'sensitive' — smaller changes too (catches overlay/caption swaps)
+      'interval'  — one frame every 2 seconds (even timeline coverage — best
+                    for slideshow/talking-head videos where text changes but
+                    the shot doesn't)
+    """
     tmpdir = os.path.dirname(in_path)
-    scene_filter = (
-        "select='eq(n\\,0)+gt(scene\\,0.35)',"
-        "scale=720:720:force_original_aspect_ratio=decrease"
-    )
+    scale = 'scale=720:720:force_original_aspect_ratio=decrease'
+    if mode == 'interval':
+        vf = f'fps=1/2,{scale}'                                   # 1 frame / 2s
+        max_frames = '30'
+    elif mode == 'sensitive':
+        vf = f"select='eq(n\\,0)+gt(scene\\,0.12)',{scale}"       # catch overlays
+        max_frames = '25'
+    else:  # 'scene'
+        vf = f"select='eq(n\\,0)+gt(scene\\,0.30)',{scale}"       # big changes
+        max_frames = '15'
     cmd = [
         'ffmpeg', '-y', '-i', in_path,
-        '-vf', scene_filter, '-vsync', 'vfr',
-        '-frames:v', '15', '-q:v', '5',
+        '-vf', vf, '-vsync', 'vfr',
+        '-frames:v', max_frames, '-q:v', '5',
         os.path.join(tmpdir, 'scene_%03d.jpg')
     ]
     ff = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
@@ -924,6 +879,7 @@ def extract_scenes_url():
 
     data = request.get_json(silent=True) or {}
     url = (data.get('url') or '').strip()
+    mode = data.get('mode') if data.get('mode') in ('scene', 'sensitive', 'interval') else 'scene'
     if not url or not url.startswith(('http://', 'https://')):
         return jsonify({'error': 'Paste a valid video URL.'}), 400
 
@@ -961,7 +917,7 @@ def extract_scenes_url():
             return jsonify({'error': 'No video downloaded from that link.'}), 400
 
         try:
-            payload = _scenes_from_file(files[0])
+            payload = _scenes_from_file(files[0], mode)
         except subprocess.TimeoutExpired:
             return jsonify({'error': 'Processing timed out — try a shorter video.'}), 408
         if not payload:
