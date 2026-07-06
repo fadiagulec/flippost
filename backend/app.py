@@ -801,7 +801,7 @@ def extract_scenes():
         with open(in_path, 'wb') as f:
             f.write(video_bytes)
 
-        mode = data.get('mode') if data.get('mode') in ('scene', 'sensitive', 'interval') else 'scene'
+        mode = data.get('mode') if data.get('mode') in ('scene', 'sensitive', 'interval', 'dense') else 'scene'
         try:
             payload = _scenes_from_file(in_path, mode)
         except FileNotFoundError:
@@ -819,18 +819,21 @@ def _scenes_from_file(in_path, mode='scene'):
     endpoints. `mode` controls WHICH frames are grabbed:
       'scene'     — big visual changes only (default; talking-head pose shifts)
       'sensitive' — smaller changes too (catches overlay/caption swaps)
-      'interval'  — one frame every 2 seconds (even timeline coverage — best
-                    for slideshow/talking-head videos where text changes but
-                    the shot doesn't)
+      'interval'  — a frame every second (dense timeline — best for catching
+                    floating graphics / screenshots that pop up briefly)
+      'dense'     — TWO frames a second (catches even quick flashes)
     """
     tmpdir = os.path.dirname(in_path)
     scale = 'scale=720:720:force_original_aspect_ratio=decrease'
-    if mode == 'interval':
-        vf = f'fps=1/2,{scale}'                                   # 1 frame / 2s
-        max_frames = '30'
+    if mode == 'dense':
+        vf = f'fps=2,{scale}'                                     # 2 frames / s
+        max_frames = '60'
+    elif mode == 'interval':
+        vf = f'fps=1,{scale}'                                     # 1 frame / s
+        max_frames = '45'
     elif mode == 'sensitive':
-        vf = f"select='eq(n\\,0)+gt(scene\\,0.12)',{scale}"       # catch overlays
-        max_frames = '25'
+        vf = f"select='eq(n\\,0)+gt(scene\\,0.08)',{scale}"       # catch overlays
+        max_frames = '30'
     else:  # 'scene'
         vf = f"select='eq(n\\,0)+gt(scene\\,0.30)',{scale}"       # big changes
         max_frames = '15'
@@ -879,7 +882,7 @@ def extract_scenes_url():
 
     data = request.get_json(silent=True) or {}
     url = (data.get('url') or '').strip()
-    mode = data.get('mode') if data.get('mode') in ('scene', 'sensitive', 'interval') else 'scene'
+    mode = data.get('mode') if data.get('mode') in ('scene', 'sensitive', 'interval', 'dense') else 'scene'
     if not url or not url.startswith(('http://', 'https://')):
         return jsonify({'error': 'Paste a valid video URL.'}), 400
 

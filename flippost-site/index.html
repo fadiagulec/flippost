@@ -435,9 +435,10 @@
                     <select id="scenesMode">
                         <option value="scene">🎬 Scene changes — big visual shifts (default)</option>
                         <option value="sensitive">✨ Every overlay — catch caption/text changes too</option>
-                        <option value="interval">⏱️ Every 2 seconds — even timeline (best for talking-heads)</option>
+                        <option value="interval">🖼️ Every 1 second — catch pop-up graphics/screenshots</option>
+                        <option value="dense">🔍 Every 0.5 second — catch quick flashes (most frames)</option>
                     </select>
-                    <div style="margin-top:4px;font-size:12px;color:#888;">Only got a few frames? Try <strong>Every overlay</strong> or <strong>Every 2 seconds</strong>.</div>
+                    <div style="margin-top:4px;font-size:12px;color:#888;">Chasing <strong>pop-up graphics or screenshots</strong>? Use <strong>Every 1 second</strong> (or <strong>Every 0.5 second</strong> for brief ones), then keep the frames you want.</div>
                 </div>
 
                 <!-- Paste-a-link: server downloads + grabs scenes, no upload, any size. -->
@@ -528,6 +529,6 @@
 
     <script src="access.js"></script>
     <!-- Cache-bust the JS so users always get the latest eraser logic. -->
-    <script src="app.js?v=scenedl1"></script>
+    <script src="app.js?v=scenedense1"></script>
 </body>
 </html>
