@@ -3496,14 +3496,23 @@ function showSuccess(msg, id) {
 
     function downloadOne(sc, baseName) {
         const blob = jpegToBlob(sc.base64);
+        if (!blob || blob.size < 64) throw new Error('empty image');
         const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = baseName + '-scene-' + String(sc.index).padStart(2, '0') + '.jpg';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        setTimeout(() => URL.revokeObjectURL(url), 30000);
+        const fname = baseName + '-scene-' + String(sc.index).padStart(2, '0') + '.jpg';
+        // Use the app-wide saver: it handles iOS (long-press modal) where a
+        // raw anchor download silently saves an empty file, and falls back to
+        // an anchor click on desktop.
+        if (typeof triggerSave === 'function') {
+            triggerSave(url, 'image/jpeg', fname);
+        } else {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fname;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
     }
 
     fileInput.addEventListener('change', (e) => {
