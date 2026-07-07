@@ -1,6 +1,7 @@
-/* FlipIt freemium access helper.
+/* FlipIt access helper — PAID ONLY (trial + free tier disabled 2026-07-07).
  * Exposes window.FlipItAccess. Plain script, no modules.
- * 7-day trial -> 3 flips/day forever -> $57 unlocks unlimited.
+ * $57 one-time unlocks the app; without Pro every flip is gated.
+ * To bring freemium back: set TRIAL_DAYS / FREE_DAILY_LIMIT above zero.
  */
 (function () {
   'use strict';
@@ -8,8 +9,8 @@
   var KEY_FIRST_USE = 'flipit_first_use';
   var KEY_PRO = 'flipit_pro';
   var KEY_DAILY = 'flipit_daily_count';
-  var TRIAL_DAYS = 7;
-  var FREE_DAILY_LIMIT = 3;
+  var TRIAL_DAYS = 0;
+  var FREE_DAILY_LIMIT = 0;
   // Fair-use caps on Pro tier — protects Anthropic API margin against the
   // <1% of users who would hammer "unlimited" (100+ flips/day for weeks).
   // Average user does ~5/day; 50/day is 10x that. 99% never hit either cap.
@@ -133,7 +134,7 @@
     var isPro = !!proToken;
     var firstUse = safeGet(KEY_FIRST_USE);
     var elapsed = firstUse ? daysSince(firstUse) : 0;
-    var isWithinTrial = !isPro && (!firstUse || elapsed < TRIAL_DAYS);
+    var isWithinTrial = !isPro && TRIAL_DAYS > 0 && (!firstUse || elapsed < TRIAL_DAYS);
     var daysRemaining = Math.max(0, TRIAL_DAYS - elapsed);
     var daily = readDaily();
     var proUsage = readProUsage();
