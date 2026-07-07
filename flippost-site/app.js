@@ -76,11 +76,8 @@ function showPaywallModal(state, reason) {
         h3.textContent = '\u{1F512} That\u2019s a Pro tool';
         p1.textContent = 'You found one of the heavy hitters. Unlock the full FlipIt pipeline below \u2014 one payment, yours forever.';
     } else {
-        h3.textContent = '\u26A1 You\u2019ve used your 3 free flips today';
-        const daysSince = Math.max(0, ((state && state.daysSinceFirstUse) || 0) - 7);
-        p1.textContent = daysSince > 0
-            ? `Your 7-day free trial ended ${daysSince} day${daysSince === 1 ? '' : 's'} ago. Free tier resets at midnight \u2014 or stop counting flips entirely.`
-            : 'Free tier resets at midnight \u2014 or stop counting flips entirely.';
+        h3.textContent = '\u26A1 Unlock FlipIt to start flipping';
+        p1.textContent = 'One payment, yours forever \u2014 every tool below, no subscription.';
     }
 
     card.appendChild(h3);
@@ -176,29 +173,13 @@ function renderTrialBanner() {
     const strongEl = document.createElement('strong');
     const numSpan = document.createElement('span');
 
-    if (state.isWithinTrial) {
-        const d = state.daysRemainingInTrial;
-        strongEl.textContent = 'Free trial active';
-        numSpan.textContent = String(d);
-        banner.append(
-            '\u{1F381} ',
-            strongEl,
-            ' \u2014 ',
-            numSpan,
-            ` day${d === 1 ? '' : 's'} left of unlimited access. `
-        );
-    } else {
-        const remaining = Math.max(0, state.dailyLimit - state.dailyCount);
-        strongEl.textContent = 'Free tier:';
-        numSpan.textContent = `${remaining} of ${state.dailyLimit}`;
-        banner.append(
-            '\u{1F4CA} ',
-            strongEl,
-            ' ',
-            numSpan,
-            ` flip${state.dailyLimit === 1 ? '' : 's'} left today. `
-        );
-    }
+    strongEl.textContent = 'FlipIt Pro';
+    banner.append(
+        '\u26a1 ',
+        strongEl,
+        ' \u2014 one payment, lifetime access, every tool unlocked. '
+    );
+    void numSpan;
 
     const ctaLink = document.createElement('a');
     ctaLink.href = 'https://buy.stripe.com/28EcMY83I1XYd2i5r83Je0q';
