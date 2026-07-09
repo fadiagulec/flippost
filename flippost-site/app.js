@@ -3532,11 +3532,13 @@ function showSuccess(msg, id) {
             urlBtn.textContent = '⏳ Downloading + grabbing scenes…';
             setStatus('⏳ Fetching video + detecting scenes (10–40s)…', null);
             try {
+                if (/instagram\.com|instagr\.am/i.test(link)) setStatus('⏳ Finding the Instagram video…', null);
+                const fetchUrl = await resolveMediaLink(link);   // IG → direct CDN url; else unchanged
                 const modeSel = document.getElementById('scenesMode');
                 const data = await postHeavyJob(
                     '/extract-scenes-url',
                     '/.netlify/functions/extract-scenes-url',
-                    { url: link, mode: (modeSel && modeSel.value) || 'scene' }
+                    { url: fetchUrl, mode: (modeSel && modeSel.value) || 'scene' }
                 );
                 if (!data.success || !Array.isArray(data.scenes) || data.scenes.length === 0) {
                     throw new Error(data.error || 'No scenes detected.');
@@ -3750,10 +3752,12 @@ function showSuccess(msg, id) {
             urlBtn.textContent = '⏳ Downloading + transcribing…';
             setStatus('⏳ Fetching audio + transcribing (10–40s)…', null);
             try {
+                if (/instagram\.com|instagr\.am/i.test(link)) setStatus('⏳ Finding the Instagram video…', null);
+                const fetchUrl = await resolveMediaLink(link);   // IG → direct CDN url; else unchanged
                 const data = await postHeavyJob(
                     '/transcribe-url',
                     '/.netlify/functions/transcribe-url',
-                    { url: link }
+                    { url: fetchUrl }
                 );
                 if (!data.success || !data.transcript) {
                     throw new Error(data.error || 'No transcript returned.');
@@ -3798,6 +3802,30 @@ async function readHeavyJobResponse(resp) {
     }
     if (!resp.ok) throw new Error(data.error || ('Server returned ' + resp.status));
     return data;
+}
+
+// Instagram links can't be downloaded server-side by Railway's yt-dlp without
+// login cookies — that's the "Whisper API error / Could not fetch" IG users
+// hit. Resolve IG links to a DIRECT CDN video URL first (via /resolve-ig, the
+// same cookie-free Apify path the Download tab uses), then hand that plain URL
+// to Railway, which fetches direct CDN files fine. Non-IG links pass straight
+// through. Throws a friendly message the caller surfaces on failure.
+async function resolveMediaLink(link) {
+    if (!/instagram\.com|instagr\.am/i.test(link)) return link;
+    let resp;
+    try {
+        resp = await fetch('/.netlify/functions/resolve-ig', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: link }),
+            signal: AbortSignal.timeout(25000)
+        });
+    } catch (e) {
+        throw new Error('Could not reach the Instagram resolver — check your connection and retry.');
+    }
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok && data && data.videoUrl) return data.videoUrl;
+    throw new Error(data.error || 'Could not fetch that Instagram video (it may be private, image-only, or removed).');
 }
 
 async function postHeavyJob(railwayPath, netlifyProxyPath, payloadObj) {
