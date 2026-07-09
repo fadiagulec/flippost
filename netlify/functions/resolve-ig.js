@@ -171,7 +171,8 @@ async function pollRun(apifyToken, runId, datasetId) {
       error: 'No video found in that Instagram post — it may be image-only.',
       _keys: Object.keys(item).slice(0, 40),
       _type: item.type || item.__typename || null,
-      _child0keys: (Array.isArray(item.childPosts) && item.childPosts[0]) ? Object.keys(item.childPosts[0]).slice(0, 40) : null
+      _igError: item.error || null,
+      _igErrorDesc: item.errorDescription || null
     };
   } finally { clearTimeout(timeout); }
 }
