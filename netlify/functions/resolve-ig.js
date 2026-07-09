@@ -2,16 +2,27 @@ require('./_error_reporter');
 const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify function: /resolve-ig
 // Resolves a public Instagram reel/post URL to a DIRECT CDN video URL using
-// Apify's instagram-scraper — the SAME cookie-free path (and APIFY_TOKEN) that
-// /download and the Instagram Browse tab already use. The Transcribe and Scene
-// Grabber "paste a link" flows call this first for IG links, then hand the
-// plain CDN url to Railway. Railway's yt-dlp can't log in to Instagram, but it
-// downloads a direct CDN file fine — so this makes IG work with no cookies.
-// Returns: { videoUrl, filename }
+// Apify's instagram-scraper — the SAME cookie-free path (and APIFY_TOKEN) the
+// Download tab uses. Railway's yt-dlp can't log in to Instagram, but it fetches
+// a direct CDN file fine, so this makes IG Transcribe / Scene Grabber work with
+// no login cookies.
+//
+// The scraper actor needs ~30-40s (Docker cold-start + scrape), which is longer
+// than a Netlify Function can stay alive (~26s). So we DON'T run it
+// synchronously. Two modes, both fast:
+//   START:  POST { url }                → kicks off an async Apify run,
+//                                          returns { runId, datasetId }
+//   POLL:   POST { runId, datasetId }   → checks the run; returns
+//                                          { videoUrl } when done,
+//                                          { status:'running' } meanwhile,
+//                                          or { error } on failure.
+// The browser starts once then polls every few seconds until it gets a URL.
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 const { assertPublicUrl } = require('./_ssrf_guard');
+
+const APIFY_ACTOR = 'apify~instagram-scraper';
 
 exports.handler = __wrapErr(async (event) => {
   const isPro = isProRequest(event);
@@ -29,59 +40,63 @@ exports.handler = __wrapErr(async (event) => {
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
 
-  // Rate-limit gate: an IG resolve spends an Apify actor run, so it counts
-  // against the same daily quota as a download (weighted the same way).
-  const quota = await enforceAiQuota(event, isPro);
-  if (!quota.allowed) return rateLimitResponse(headers, quota);
+  const apifyToken = process.env.APIFY_TOKEN;
+  if (!apifyToken) {
+    return { statusCode: 503, headers, body: JSON.stringify({ error: 'Instagram support is not configured (missing APIFY_TOKEN).' }) };
+  }
 
-  let url;
+  let body;
   try {
-    const body = JSON.parse(event.body || '{}');
-    url = (body.url || '').trim();
+    body = JSON.parse(event.body || '{}');
   } catch {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid request body' }) };
   }
+
+  // ── POLL mode: { runId, datasetId } — cheap, NOT quota-gated ──
+  if (body.runId) {
+    try {
+      const out = await pollRun(apifyToken, String(body.runId), String(body.datasetId || ''));
+      return { statusCode: 200, headers, body: JSON.stringify(out) };
+    } catch (e) {
+      console.log('resolve-ig poll failed:', e.message);
+      return { statusCode: 502, headers, body: JSON.stringify({ error: 'Lost track of the Instagram fetch — please retry.' }) };
+    }
+  }
+
+  // ── START mode: { url } — one Apify run = one quota hit ──
+  const url = (body.url || '').trim();
   if (!url) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing url parameter' }) };
   if (!/instagram\.com|instagr\.am/i.test(url)) {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Not an Instagram URL' }) };
   }
-
-  // SSRF gate (same as download.js): reject private/link-local/loopback and
-  // DNS-rebinding before we hand the URL to any fetch.
   try {
     await assertPublicUrl(url);
   } catch {
     return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid or blocked URL' }) };
   }
 
+  const quota = await enforceAiQuota(event, isPro);
+  if (!quota.allowed) return rateLimitResponse(headers, quota);
+
   try {
-    const v = await resolveInstagramVideo(url);
-    if (v && v.videoUrl) {
-      return { statusCode: 200, headers, body: JSON.stringify(v) };
-    }
-    return {
-      statusCode: 400, headers,
-      body: JSON.stringify({ error: 'No video found in that Instagram post — it may be image-only, a private account, or removed.' })
-    };
+    const started = await startRun(apifyToken, url);
+    return { statusCode: 200, headers, body: JSON.stringify(started) };
   } catch (e) {
-    console.log('resolve-ig failed:', e.message);
-    return { statusCode: 502, headers, body: JSON.stringify({ error: 'Instagram resolver is busy — try again in a moment.', detail: String(e && e.message || e) }) };
+    console.log('resolve-ig start failed:', e.message);
+    return { statusCode: 502, headers, body: JSON.stringify({ error: 'Could not start the Instagram fetch — try again in a moment.' }) };
   }
 });
 
-// Mirror of download.js's tryApifyInstagram, trimmed to just the direct video
-// URL (Reel or first video child of a carousel). No cookies required.
-async function resolveInstagramVideo(url) {
-  const apifyToken = process.env.APIFY_TOKEN;
-  if (!apifyToken) throw new Error('APIFY_TOKEN not set');
-
-  // Netlify Functions hard-cap at 26s; bound the Apify sync run at 18s + a 20s
-  // client abort so a slow scrape aborts cleanly instead of killing the call.
+// Kick off an async Apify actor run. Returns { runId, datasetId } immediately;
+// the actor keeps running server-side while the browser polls.
+async function startRun(apifyToken, url) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 20000);
+  const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const apifyUrl = 'https://api.apify.com/v2/acts/apify~instagram-scraper/run-sync-get-dataset-items?timeout=18';
-    const resp = await fetch(apifyUrl, {
+    // timeout=120 caps the actor's own run time; memory keeps the cold-start
+    // reasonable. This returns as soon as the run is CREATED, not finished.
+    const runUrl = 'https://api.apify.com/v2/acts/' + APIFY_ACTOR + '/runs?timeout=120&memory=1024';
+    const resp = await fetch(runUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + apifyToken },
       body: JSON.stringify({
@@ -94,12 +109,48 @@ async function resolveInstagramVideo(url) {
       signal: controller.signal
     });
     if (!resp.ok) {
-      const errBody = await resp.text().catch(() => '');
-      throw new Error('Apify status ' + resp.status + ' :: ' + errBody.slice(0, 200));
+      const t = await resp.text().catch(() => '');
+      throw new Error('start status ' + resp.status + ' ' + t.slice(0, 120));
     }
-    const raw = await resp.json();
-    const item = Array.isArray(raw) ? raw[0] : null;
-    if (!item) return null;
+    const j = await resp.json();
+    const data = j && j.data;
+    if (!data || !data.id) throw new Error('no run id in start response');
+    return { runId: data.id, datasetId: data.defaultDatasetId || '', status: 'running' };
+  } finally { clearTimeout(timeout); }
+}
+
+// Check a run. When it's SUCCEEDED, read the dataset and pull the direct video
+// URL. While it's still going, report { status:'running' }. On any terminal
+// failure, report a friendly { error }.
+async function pollRun(apifyToken, runId, datasetId) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+  try {
+    const runResp = await fetch('https://api.apify.com/v2/actor-runs/' + encodeURIComponent(runId), {
+      headers: { 'Authorization': 'Bearer ' + apifyToken },
+      signal: controller.signal
+    });
+    if (!runResp.ok) throw new Error('run status ' + runResp.status);
+    const runJ = await runResp.json();
+    const run = (runJ && runJ.data) || {};
+    const status = run.status || 'UNKNOWN';
+
+    if (status === 'READY' || status === 'RUNNING') return { status: 'running' };
+    if (status !== 'SUCCEEDED') {
+      return { error: 'Instagram could not fetch that video (it may be private, image-only, or removed).' };
+    }
+
+    // SUCCEEDED — read the one item from the dataset.
+    const dsId = datasetId || run.defaultDatasetId;
+    if (!dsId) return { error: 'Instagram fetch finished but returned nothing — try again.' };
+    const dsResp = await fetch('https://api.apify.com/v2/datasets/' + encodeURIComponent(dsId) + '/items?clean=true&limit=1', {
+      headers: { 'Authorization': 'Bearer ' + apifyToken },
+      signal: controller.signal
+    });
+    if (!dsResp.ok) throw new Error('dataset status ' + dsResp.status);
+    const items = await dsResp.json();
+    const item = Array.isArray(items) ? items[0] : null;
+    if (!item) return { error: 'That Instagram post returned no media — it may be private or removed.' };
 
     const shortcode = (typeof item.shortCode === 'string' && item.shortCode) || 'instagram';
     const fnameBase = 'instagram_' + shortcode;
@@ -108,7 +159,7 @@ async function resolveInstagramVideo(url) {
     if (typeof item.videoUrl === 'string' && item.videoUrl.startsWith('http')) {
       return { videoUrl: item.videoUrl, filename: fnameBase + '.mp4' };
     }
-    // Carousel: use the first child that actually has a video track.
+    // Carousel: first child that actually has a video track.
     if (Array.isArray(item.childPosts)) {
       for (const cp of item.childPosts) {
         if (cp && typeof cp.videoUrl === 'string' && cp.videoUrl.startsWith('http')) {
@@ -116,6 +167,6 @@ async function resolveInstagramVideo(url) {
         }
       }
     }
-    return null;
+    return { error: 'No video found in that Instagram post — it may be image-only.' };
   } finally { clearTimeout(timeout); }
 }

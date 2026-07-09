@@ -3810,22 +3810,42 @@ async function readHeavyJobResponse(resp) {
 // same cookie-free Apify path the Download tab uses), then hand that plain URL
 // to Railway, which fetches direct CDN files fine. Non-IG links pass straight
 // through. Throws a friendly message the caller surfaces on failure.
+//
+// The Apify scraper takes ~30-40s — longer than a Netlify Function can live —
+// so /resolve-ig starts the run and we POLL it here: start once, then check
+// every 3s (up to ~60s) until it returns the direct URL.
 async function resolveMediaLink(link) {
     if (!/instagram\.com|instagr\.am/i.test(link)) return link;
-    let resp;
-    try {
-        resp = await fetch('/.netlify/functions/resolve-ig', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: link }),
-            signal: AbortSignal.timeout(25000)
-        });
-    } catch (e) {
-        throw new Error('Could not reach the Instagram resolver — check your connection and retry.');
+    const call = async (payload) => {
+        let resp;
+        try {
+            resp = await fetch('/.netlify/functions/resolve-ig', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: AbortSignal.timeout(20000)
+            });
+        } catch (e) {
+            throw new Error('Could not reach the Instagram resolver — check your connection and retry.');
+        }
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || ('Instagram resolver error (' + resp.status + ').'));
+        return data;
+    };
+    // Start the async Apify run.
+    const started = await call({ url: link });
+    if (started.videoUrl) return started.videoUrl;       // fast path (unlikely)
+    if (!started.runId) throw new Error(started.error || 'Could not start the Instagram fetch — try again.');
+    // Poll until the run finishes (~30-40s typical; give it up to 60s).
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    for (let i = 0; i < 20; i++) {
+        await sleep(3000);
+        const p = await call({ runId: started.runId, datasetId: started.datasetId });
+        if (p.videoUrl) return p.videoUrl;
+        if (p.error) throw new Error(p.error);
+        // else status:'running' — keep waiting
     }
-    const data = await resp.json().catch(() => ({}));
-    if (resp.ok && data && data.videoUrl) return data.videoUrl;
-    throw new Error(data.error || 'Could not fetch that Instagram video (it may be private, image-only, or removed).');
+    throw new Error('Instagram is taking too long to respond — try again, or use a TikTok/YouTube link.');
 }
 
 async function postHeavyJob(railwayPath, netlifyProxyPath, payloadObj) {
