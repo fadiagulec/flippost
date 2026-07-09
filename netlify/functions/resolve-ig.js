@@ -65,7 +65,7 @@ exports.handler = __wrapErr(async (event) => {
     };
   } catch (e) {
     console.log('resolve-ig failed:', e.message);
-    return { statusCode: 502, headers, body: JSON.stringify({ error: 'Instagram resolver is busy — try again in a moment.' }) };
+    return { statusCode: 502, headers, body: JSON.stringify({ error: 'Instagram resolver is busy — try again in a moment.', detail: String(e && e.message || e) }) };
   }
 });
 
