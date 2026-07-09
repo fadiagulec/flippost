@@ -152,6 +152,20 @@ async function pollRun(apifyToken, runId, datasetId) {
     const item = Array.isArray(items) ? items[0] : null;
     if (!item) return { error: 'That Instagram post returned no media — it may be private or removed.' };
 
+    // The scraper returns an error record (not a post) when Instagram won't
+    // serve the post to it — private account, deleted post, or a wrong/expired
+    // link. Turn that into a message the user can actually act on.
+    if (item.error || item.errorDescription) {
+      const d = String(item.errorDescription || item.error || '').toLowerCase();
+      if (item.error === 'not_found' || d.includes('not exist') || d.includes('not found')) {
+        return { error: 'Instagram couldn’t find that post — make sure the reel is public and the link is exactly right (copy it fresh from the app).' };
+      }
+      if (d.includes('private') || d.includes('login') || d.includes('restricted')) {
+        return { error: 'That Instagram post is private or login-restricted, so it can’t be fetched. Try a public reel.' };
+      }
+      return { error: 'Instagram couldn’t open that post — try copying the link again, or use a public reel.' };
+    }
+
     const shortcode = (typeof item.shortCode === 'string' && item.shortCode) || 'instagram';
     const fnameBase = 'instagram_' + shortcode;
 
@@ -167,12 +181,6 @@ async function pollRun(apifyToken, runId, datasetId) {
         }
       }
     }
-    return {
-      error: 'No video found in that Instagram post — it may be image-only.',
-      _keys: Object.keys(item).slice(0, 40),
-      _type: item.type || item.__typename || null,
-      _igError: item.error || null,
-      _igErrorDesc: item.errorDescription || null
-    };
+    return { error: 'That post has no video track — Transcribe and Scene Grabber need a video (reel), not a photo.' };
   } finally { clearTimeout(timeout); }
 }
