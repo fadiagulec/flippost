@@ -93,7 +93,10 @@ async function resolveInstagramVideo(url) {
       }),
       signal: controller.signal
     });
-    if (!resp.ok) throw new Error('Apify status ' + resp.status);
+    if (!resp.ok) {
+      const errBody = await resp.text().catch(() => '');
+      throw new Error('Apify status ' + resp.status + ' :: ' + errBody.slice(0, 200));
+    }
     const raw = await resp.json();
     const item = Array.isArray(raw) ? raw[0] : null;
     if (!item) return null;
