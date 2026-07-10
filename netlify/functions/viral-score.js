@@ -26,6 +26,40 @@ const DIMENSIONS = [
     { key: 'platform_fit', label: 'Platform Fit' }
 ];
 
+// Forced tool-use gives us a GUARANTEED-valid structured object from Claude.
+// The old approach parsed free-text JSON, which broke intermittently once the
+// `rewrite` field carried real line breaks (unescaped newlines → JSON.parse
+// throws → 500). Tool-use has the API validate the shape for us — no parsing.
+const SCORECARD_TOOL = {
+    name: 'scorecard',
+    description: 'Return the viral scorecard for the post, plus specific fixes and a full rewrite engineered to score 9-10.',
+    input_schema: {
+        type: 'object',
+        properties: {
+            score: { type: 'number', description: '0-10 overall (average of the six dimension scores, rescaled to 0-10)' },
+            verdict: { type: 'string', description: 'One of: Needs Work | Decent | Good — Minor Tweaks | Strong | Viral-Ready' },
+            summary: { type: 'string', description: '2-3 sentence overall take' },
+            dimensions: {
+                type: 'array',
+                description: 'Exactly the six dimensions in order: hook, emotion, cta, hashtags, shareability, platform_fit',
+                items: {
+                    type: 'object',
+                    properties: {
+                        key: { type: 'string' },
+                        label: { type: 'string' },
+                        score: { type: 'number', description: '0-100' },
+                        comment: { type: 'string', description: 'one short specific sentence' }
+                    },
+                    required: ['key', 'score', 'comment']
+                }
+            },
+            fixes: { type: 'array', items: { type: 'string' }, description: '3-5 specific, copy-pasteable changes (actual replacement words, not advice)' },
+            rewrite: { type: 'string', description: 'the full post rewritten to score 9-10, ready to paste (line breaks and hashtags included)' }
+        },
+        required: ['score', 'verdict', 'summary', 'dimensions', 'fixes', 'rewrite']
+    }
+};
+
 exports.handler = __wrapErr(async function (event) {
     const isPro = isProRequest(event);
     const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
@@ -70,8 +104,7 @@ exports.handler = __wrapErr(async function (event) {
         "You produce a specific, actionable scorecard — not generic advice.",
         "You score each dimension from 0–100 based on what's in the caption, NOT on what's missing from the question. If the caption has no clear CTA, that's a low CTA score.",
         "",
-        "OUTPUT JSON ONLY. No preamble, no markdown fences, no commentary. The exact shape:",
-        '{"score": <0-10 number, average of dimension scores rescaled>, "verdict": "<one of: Needs Work | Decent | Good — Minor Tweaks | Strong | Viral-Ready>", "summary": "<2-3 sentence overall take>", "dimensions": [{"key": "<dim key>", "label": "<dim label>", "score": <0-100>, "comment": "<one specific sentence — what worked, what to change, with concrete examples>"}], "fixes": ["<3-5 SPECIFIC, copy-pasteable changes that would push the weakest dimensions to 90+ — write the ACTUAL replacement words, not advice>"], "rewrite": "<a full rewritten version of THIS post engineered to score 9-10: killer hook line, emotional pull, clear friction-free CTA, right length + hashtags for the platform. Ready to paste as-is.>"}',
+        "Return your result by calling the `scorecard` tool. Fill EVERY field.",
         "",
         "Dimensions you MUST score (use these exact keys): hook, emotion, cta, hashtags, shareability, platform_fit.",
         "",
@@ -97,7 +130,7 @@ exports.handler = __wrapErr(async function (event) {
         '</caption>',
         hashtags ? '\n<hashtags>\n' + hashtags + '\n</hashtags>' : '',
         '',
-        'Output the JSON scorecard now — including the specific "fixes" and the full "rewrite" that would score 9-10.'
+        'Score it now and call the scorecard tool — include the specific "fixes" and the full "rewrite" that would score 9-10.'
     ].filter(Boolean).join('\n');
 
     try {
@@ -113,6 +146,8 @@ exports.handler = __wrapErr(async function (event) {
                 max_tokens: 2600,
                 temperature: 0.4,
                 system: systemPrompt,
+                tools: [SCORECARD_TOOL],
+                tool_choice: { type: 'tool', name: 'scorecard' },
                 messages: [{ role: 'user', content: userPrompt }]
             }),
             signal: AbortSignal.timeout(25000)
@@ -122,15 +157,12 @@ exports.handler = __wrapErr(async function (event) {
             console.error('viral-score Claude error:', resp.status, data?.error?.message);
             return { statusCode: 502, headers, body: JSON.stringify({ error: 'Scoring failed. Please try again.' }) };
         }
-        const text = (data.content?.[0]?.text || '').trim();
-        let parsed;
-        try {
-            parsed = JSON.parse(text);
-        } catch {
-            const match = text.match(/\{[\s\S]*\}/);
-            if (!match) throw new Error('Could not parse scorecard JSON.');
-            parsed = JSON.parse(match[0]);
-        }
+        // Forced tool-use → the structured object is already valid JSON in the
+        // tool_use block's `input`. No text parsing, no newline-escaping bugs.
+        const toolUse = Array.isArray(data.content)
+            ? data.content.find(c => c && c.type === 'tool_use' && c.name === 'scorecard')
+            : null;
+        const parsed = (toolUse && toolUse.input) || {};
         // Light validation so the UI never crashes on a malformed response.
         const score = Number(parsed.score);
         const verdict = String(parsed.verdict || '').slice(0, 80);
