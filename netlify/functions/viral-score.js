@@ -26,13 +26,18 @@ const DIMENSIONS = [
     { key: 'platform_fit', label: 'Platform Fit' }
 ];
 
-// Forced tool-use gives us a GUARANTEED-valid structured object from Claude.
-// The old approach parsed free-text JSON, which broke intermittently once the
-// `rewrite` field carried real line breaks (unescaped newlines → JSON.parse
-// throws → 500). Tool-use has the API validate the shape for us — no parsing.
+// Forced tool-use gives us a GUARANTEED-valid structured object from Claude
+// (no free-text JSON parsing, no newline-escaping bugs).
+//
+// The work is split across TWO parallel Claude calls so neither exceeds
+// Netlify's ~26s function cap. One big call generating the scorecard + fixes +
+// rewrite + 3 hooks + 2 alt captions + hashtags ran ~26-27s and 500'd. Run in
+// parallel, the function's wall-clock is bounded by the SLOWER call (~18s), not
+// the sum. The response shape is identical to before, so the frontend is
+// unchanged. If the extras call fails, the core scorecard still returns.
 const SCORECARD_TOOL = {
     name: 'scorecard',
-    description: 'Return the viral scorecard for the post, plus specific fixes, stronger hooks, a best caption + alternatives, and recommended hashtags.',
+    description: 'Return the viral scorecard for the post, plus specific fixes and the single best rewritten caption.',
     input_schema: {
         type: 'object',
         properties: {
@@ -54,14 +59,52 @@ const SCORECARD_TOOL = {
                 }
             },
             fixes: { type: 'array', items: { type: 'string' }, description: '3-5 specific, copy-pasteable changes (actual replacement words, not advice)' },
-            hooks: { type: 'array', items: { type: 'string' }, description: '3 alternative FIRST-LINE hooks, each a scroll-stopper strong enough to score 10/10 on hook strength; vary the angle (curiosity gap, bold claim, relatable pain)' },
-            rewrite: { type: 'string', description: 'the single BEST full caption, rewritten to score 9-10, ready to paste (line breaks and hashtags included)' },
-            altCaptions: { type: 'array', items: { type: 'string' }, description: '2 alternative full captions, each a DIFFERENT angle from the rewrite; keep each tight (~60-90 words)' },
-            recommendedHashtags: { type: 'array', items: { type: 'string' }, description: '10-14 hashtags to actually use — a mix of broad-reach, niche, and branded; each WITHOUT the leading #' }
+            rewrite: { type: 'string', description: 'the single BEST full caption, rewritten to score 9-10, ready to paste (line breaks and hashtags included)' }
         },
-        required: ['score', 'verdict', 'summary', 'dimensions', 'fixes', 'hooks', 'rewrite', 'altCaptions', 'recommendedHashtags']
+        required: ['score', 'verdict', 'summary', 'dimensions', 'fixes', 'rewrite']
     }
 };
+
+// Second, smaller call: the "upgrade assets" (kept separate so both calls stay
+// fast enough to run inside the function's time budget).
+const EXTRAS_TOOL = {
+    name: 'extras',
+    description: 'Return upgrade assets for the post: stronger hooks, alternative captions, and recommended hashtags.',
+    input_schema: {
+        type: 'object',
+        properties: {
+            hooks: { type: 'array', items: { type: 'string' }, description: '3 alternative FIRST-LINE hooks (opening line only), each a scroll-stopper strong enough to score 10/10; vary the angle (curiosity gap, bold claim, relatable pain)' },
+            altCaptions: { type: 'array', items: { type: 'string' }, description: '2 alternative full captions, each a DIFFERENT angle (story-led, list-led, contrarian); keep each tight (~60-90 words)' },
+            recommendedHashtags: { type: 'array', items: { type: 'string' }, description: '10-14 hashtags to actually use — a mix of broad-reach, niche, and branded; each WITHOUT the leading #' }
+        },
+        required: ['hooks', 'altCaptions', 'recommendedHashtags']
+    }
+};
+
+// One forced-tool Claude call → returns the tool_use input object (or throws).
+async function callClaudeTool(apiKey, system, user, tool, maxTokens) {
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+            model: 'claude-sonnet-4-6',
+            max_tokens: maxTokens,
+            temperature: 0.4,
+            system,
+            tools: [tool],
+            tool_choice: { type: 'tool', name: tool.name },
+            messages: [{ role: 'user', content: user }]
+        }),
+        signal: AbortSignal.timeout(24000)
+    });
+    if (!resp.ok) {
+        const t = await resp.text().catch(() => '');
+        throw new Error('claude ' + resp.status + ' ' + t.slice(0, 140));
+    }
+    const data = await resp.json();
+    const tu = Array.isArray(data.content) ? data.content.find(c => c && c.type === 'tool_use' && c.name === tool.name) : null;
+    return (tu && tu.input) || {};
+}
 
 exports.handler = __wrapErr(async function (event) {
     const isPro = isProRequest(event);
@@ -105,75 +148,60 @@ exports.handler = __wrapErr(async function (event) {
         return { statusCode: 503, headers, body: JSON.stringify({ error: 'Service temporarily unavailable.' }) };
     }
 
-    const systemPrompt = [
-        "You are a viral content strategist who scores social-media posts BEFORE they're published.",
-        "You produce a specific, actionable scorecard — not generic advice.",
-        "You score each dimension from 0–100 based on what's in the caption, NOT on what's missing from the question. If the caption has no clear CTA, that's a low CTA score.",
-        "",
-        "Return your result by calling the `scorecard` tool. Fill EVERY field.",
-        "",
-        "Dimensions you MUST score (use these exact keys): hook, emotion, cta, hashtags, shareability, platform_fit.",
-        "",
-        "Per-dimension rubric:",
-        "- hook: First 1-2 lines. Does it stop the scroll? Specificity, pattern interrupt, curiosity gap. 80+ = a great hook.",
-        "- emotion: What feeling does it trigger? Awe, relief, FOMO, identity-resonance score high; bland/informational scores low.",
-        "- cta: Is there a clear action and friction-free path? 'Comment APP for link' scores higher than 'check it out'.",
-        "- hashtags: Mix of broad + niche + branded. Too few or all-broad = low. None given when platform expects them = low.",
-        "- shareability: Would someone DM or repost this? Identity-statements, lists, before/after, controversial-but-true frames score high.",
-        "- platform_fit: Does the format/tone/length match the platform's norms (Instagram caption length, TikTok hook urgency, LinkedIn POV, etc.)?",
-        "",
-        "fixes: 3-5 highest-leverage, SPECIFIC changes — write the actual replacement words, not advice. 'Open with: \"I quit my $200k job — here's the math\"' NOT 'improve the hook'. Target the lowest-scoring dimensions first.",
-        "hooks: 3 alternative FIRST-LINE hooks (opening line only), each a scroll-stopper that would score 10/10 on hook strength. Vary the angle — one curiosity gap, one bold claim/number, one relatable pain.",
-        "rewrite: the single BEST full caption — rewrite the ENTIRE post applying every fix so it would genuinely score 9-10 (aim for a 10). Keep the creator's topic and meaning; upgrade the hook, structure, CTA, and hashtags. Ready-to-post text with line breaks. Keep it TIGHT — under ~120 words (longer only if the original is a long spoken script).",
-        "altCaptions: 2 alternative full captions, each taking a DIFFERENT angle than the rewrite (e.g. story-led, list-led, contrarian). Keep each tight (~60-90 words), ready to paste.",
-        "recommendedHashtags: 10-14 hashtags the creator should actually use — a mix of broad-reach, niche, and branded. No spaces; no leading # needed.",
-        "If a <brand_voice> is given, write the hooks, rewrite, and altCaptions in THAT voice.",
-        "",
-        "Be fast and economical with words: keep each dimension 'comment' to ONE short sentence. Be honest — a truly mid post gets a 4 or 5, not a participation-trophy 7."
-    ].join('\n');
-
-    const userPrompt = [
-        `Score this ${platform} post.`,
-        '',
+    // Shared context block both calls see.
+    const contextBlock = [
         '<caption>',
         caption,
         '</caption>',
         hashtags ? '\n<hashtags>\n' + hashtags + '\n</hashtags>' : '',
-        voiceContext ? '\n<brand_voice>\n' + voiceContext + '\n</brand_voice>\nWrite the "rewrite" (and the wording inside "fixes") in THIS brand voice — match its tone, vocabulary, and personality so it sounds like this specific creator. Keep the scoring itself objective.' : '',
-        '',
-        'Score it now and call the scorecard tool — include the fixes, 3 stronger hooks, the best caption ("rewrite") plus 2 alternatives, and recommended hashtags.'
+        voiceContext ? '\n<brand_voice>\n' + voiceContext + '\n</brand_voice>' : ''
     ].filter(Boolean).join('\n');
 
+    // ── Call 1: the scorecard (score + dimensions + fixes + best caption) ──
+    const systemScore = [
+        "You are a viral content strategist who scores social-media posts BEFORE they're published.",
+        "Produce a specific, actionable scorecard — not generic advice.",
+        "Score each dimension 0–100 based on what's IN the caption, not what's missing. No clear CTA → low CTA score.",
+        "",
+        "Call the `scorecard` tool. Fill EVERY field.",
+        "Dimensions (exact keys): hook, emotion, cta, hashtags, shareability, platform_fit.",
+        "Rubric — hook: first 1-2 lines, does it stop the scroll? 80+ = great. emotion: awe/relief/FOMO/identity score high, bland low. cta: clear friction-free action scores high. hashtags: broad+niche+branded mix; too few/all-broad = low. shareability: would someone DM/repost it? platform_fit: matches the platform's norms?",
+        "",
+        "fixes: 3-5 SPECIFIC changes — the actual replacement words, not advice ('Open with: \"I quit my $200k job — here's the math\"' NOT 'improve the hook'). Target the weakest dimensions first.",
+        "rewrite: the single BEST full caption — rewrite the whole post so it scores 9-10 (aim for 10). Ready to paste, with line breaks. Keep it TIGHT — under ~120 words (longer only for a long spoken script).",
+        voiceContext ? "If a <brand_voice> is given, write the rewrite and fixes wording in THAT voice; keep scoring objective." : "",
+        "",
+        "Be economical: each dimension 'comment' is ONE short sentence. Be honest — a mid post gets a 4-5, not a participation-trophy 7."
+    ].filter(Boolean).join('\n');
+    const userScore = `Score this ${platform} post.\n\n${contextBlock}\n\nCall the scorecard tool now.`;
+
+    // ── Call 2: the upgrade assets (hooks + alt captions + hashtags) ──
+    const systemExtras = [
+        "You are a viral content strategist. For the given post, produce upgrade assets by calling the `extras` tool. Fill EVERY field.",
+        "hooks: 3 alternative FIRST-LINE hooks (opening line only), each a scroll-stopper strong enough to score 10/10. Vary the angle — one curiosity gap, one bold claim/number, one relatable pain.",
+        "altCaptions: 2 alternative FULL captions, each a DIFFERENT angle (story-led, list-led, contrarian). Keep each tight (~60-90 words), ready to paste.",
+        "recommendedHashtags: 10-14 hashtags to actually use — a mix of broad-reach, niche, and branded. No spaces; no leading # needed.",
+        voiceContext ? "If a <brand_voice> is given, write the hooks and altCaptions in THAT voice." : ""
+    ].filter(Boolean).join('\n');
+    const userExtras = `For this ${platform} post, generate stronger hooks, 2 alternative captions, and recommended hashtags.\n\n${contextBlock}\n\nCall the extras tool now.`;
+
     try {
-        const resp = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': '2023-06-01'
-            },
-            body: JSON.stringify({
-                model: 'claude-sonnet-4-6',
-                max_tokens: 3200,
-                temperature: 0.4,
-                system: systemPrompt,
-                tools: [SCORECARD_TOOL],
-                tool_choice: { type: 'tool', name: 'scorecard' },
-                messages: [{ role: 'user', content: userPrompt }]
-            }),
-            signal: AbortSignal.timeout(25000)
-        });
-        const data = await resp.json();
-        if (!resp.ok) {
-            console.error('viral-score Claude error:', resp.status, data?.error?.message);
+        // Both calls run in parallel — wall-clock is the slower one (~18s), so
+        // the function finishes well under the ~26s cap.
+        const [scoreRes, extrasRes] = await Promise.allSettled([
+            callClaudeTool(apiKey, systemScore, userScore, SCORECARD_TOOL, 2000),
+            callClaudeTool(apiKey, systemExtras, userExtras, EXTRAS_TOOL, 1400)
+        ]);
+        if (scoreRes.status !== 'fulfilled') {
+            console.error('viral-score scorecard failed:', scoreRes.reason && scoreRes.reason.message);
             return { statusCode: 502, headers, body: JSON.stringify({ error: 'Scoring failed. Please try again.' }) };
         }
-        // Forced tool-use → the structured object is already valid JSON in the
-        // tool_use block's `input`. No text parsing, no newline-escaping bugs.
-        const toolUse = Array.isArray(data.content)
-            ? data.content.find(c => c && c.type === 'tool_use' && c.name === 'scorecard')
-            : null;
-        const parsed = (toolUse && toolUse.input) || {};
+        const parsed = scoreRes.value || {};
+        // Extras are a bonus — if that call failed, still return the scorecard.
+        const extras = (extrasRes.status === 'fulfilled' && extrasRes.value) ? extrasRes.value : {};
+        if (extrasRes.status !== 'fulfilled') {
+            console.warn('viral-score extras failed:', extrasRes.reason && extrasRes.reason.message);
+        }
         // Light validation so the UI never crashes on a malformed response.
         const score = Number(parsed.score);
         const verdict = String(parsed.verdict || '').slice(0, 80);
@@ -192,14 +220,14 @@ exports.handler = __wrapErr(async function (event) {
             ? parsed.fixes.filter(x => typeof x === 'string' && x.trim()).slice(0, 6).map(s => s.trim().slice(0, 400))
             : [];
         const rewrite = String(parsed.rewrite || '').trim().slice(0, 4000);
-        const hooks = Array.isArray(parsed.hooks)
-            ? parsed.hooks.filter(x => typeof x === 'string' && x.trim()).slice(0, 4).map(s => s.trim().slice(0, 300))
+        const hooks = Array.isArray(extras.hooks)
+            ? extras.hooks.filter(x => typeof x === 'string' && x.trim()).slice(0, 4).map(s => s.trim().slice(0, 300))
             : [];
-        const altCaptions = Array.isArray(parsed.altCaptions)
-            ? parsed.altCaptions.filter(x => typeof x === 'string' && x.trim()).slice(0, 3).map(s => s.trim().slice(0, 2000))
+        const altCaptions = Array.isArray(extras.altCaptions)
+            ? extras.altCaptions.filter(x => typeof x === 'string' && x.trim()).slice(0, 3).map(s => s.trim().slice(0, 2000))
             : [];
-        const recommendedHashtags = Array.isArray(parsed.recommendedHashtags)
-            ? parsed.recommendedHashtags.filter(x => typeof x === 'string' && x.trim()).slice(0, 20).map(s => '#' + s.trim().replace(/^#+/, '').replace(/\s+/g, '').slice(0, 60))
+        const recommendedHashtags = Array.isArray(extras.recommendedHashtags)
+            ? extras.recommendedHashtags.filter(x => typeof x === 'string' && x.trim()).slice(0, 20).map(s => '#' + s.trim().replace(/^#+/, '').replace(/\s+/g, '').slice(0, 60))
             : [];
         return {
             statusCode: 200,
