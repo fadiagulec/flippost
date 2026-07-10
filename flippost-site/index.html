@@ -197,6 +197,17 @@
                     <div id="trendingWindowChips" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
                 </div>
             </div>
+
+            <!-- Paste a profile/page link → that account's Top 5 viral posts -->
+            <div class="input-section" style="margin-top:14px;">
+                <div style="font-weight:700;color:#1a1a2e;font-size:14px;margin-bottom:8px;">🏆 …or paste a profile link — see their Top 5 viral posts</div>
+                <input type="text" id="profileTopUrl" placeholder="instagram.com/username  or  @username" style="width:100%;padding:11px;border:1.5px solid #e0dcd5;border-radius:8px;font-size:14px;box-sizing:border-box;" />
+                <button id="profileTopBtn" type="button" style="width:100%;margin-top:8px;padding:12px;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;border:none;border-radius:8px;font-weight:700;font-size:15px;cursor:pointer;">🏆 Top 5 Viral Posts</button>
+                <div style="margin-top:6px;font-size:12px;color:#888;">Instagram profiles. We rank their recent posts by likes + comments — takes ~30s.</div>
+                <div id="profileTopStatus" style="margin-top:8px;text-align:center;font-size:14px;color:#555;min-height:18px;"></div>
+            </div>
+            <div id="profileTopResults"></div>
+
             <div id="trendingResultsContainer"></div>
         </div>
 
@@ -563,6 +574,6 @@
 
     <script src="access.js"></script>
     <!-- Cache-bust the JS so users always get the latest eraser logic. -->
-    <script src="app.js?v=voice1"></script>
+    <script src="app.js?v=profiletop1"></script>
 </body>
 </html>

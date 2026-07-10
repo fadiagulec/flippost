@@ -4060,6 +4060,140 @@ function showSuccess(msg, id) {
     urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
 })();
 
+// ── PROFILE → TOP 5 VIRAL POSTS (Discover) ────────────────────────
+// Paste an Instagram profile/page link (or @handle) → that account's top 5
+// posts ranked by likes + comments. Backed by /profile-top, which scrapes the
+// profile via Apify ASYNC (start + poll) so it doesn't 502 like a sync browse.
+(function profileTopModule() {
+    const btn = document.getElementById('profileTopBtn');
+    if (!btn) return;
+    const input = document.getElementById('profileTopUrl');
+    const statusEl = document.getElementById('profileTopStatus');
+    const results = document.getElementById('profileTopResults');
+
+    function setStatus(msg, ok) {
+        statusEl.textContent = msg || '';
+        statusEl.style.color = ok === false ? '#c2185b' : (ok === true ? '#0d6e66' : '#555');
+    }
+    function fmt(n) {
+        n = Number(n) || 0;
+        if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+        return String(n);
+    }
+    async function call(payload) {
+        let resp;
+        try {
+            resp = await fetch('/.netlify/functions/profile-top', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: AbortSignal.timeout(20000)
+            });
+        } catch (e) {
+            throw new Error('Could not reach the lookup — check your connection and retry.');
+        }
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) throw new Error(data.error || ('Lookup error (' + resp.status + ').'));
+        return data;
+    }
+    function render(posts, account) {
+        results.innerHTML = '';
+        const wrap = document.createElement('div');
+        wrap.className = 'result-section';
+        const h = document.createElement('h4');
+        h.style.cssText = 'font-size:16px;color:#1a1a2e;margin:0 0 12px;';
+        h.textContent = '🏆 Top ' + posts.length + ' viral posts' + (account ? ' — ' + account : '');
+        wrap.appendChild(h);
+        posts.forEach((p, i) => {
+            const card = document.createElement('div');
+            card.style.cssText = 'display:flex;gap:12px;background:#faf8f5;border:1px solid #e8e4de;border-radius:12px;padding:12px;margin-bottom:10px;';
+            const left = document.createElement('div');
+            left.style.cssText = 'flex:0 0 88px;position:relative;';
+            const rank = document.createElement('div');
+            rank.style.cssText = 'position:absolute;top:4px;left:4px;background:#0d6e66;color:#fff;font-weight:800;font-size:12px;padding:2px 7px;border-radius:999px;z-index:1;';
+            rank.textContent = '#' + (i + 1);
+            left.appendChild(rank);
+            if (p.thumbnail) {
+                const img = document.createElement('img');
+                img.src = p.thumbnail; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
+                img.style.cssText = 'width:88px;height:88px;object-fit:cover;border-radius:8px;display:block;background:#eee;';
+                img.onerror = function () { this.style.display = 'none'; };
+                left.appendChild(img);
+            }
+            card.appendChild(left);
+            const bd = document.createElement('div');
+            bd.style.cssText = 'flex:1;min-width:0;';
+            const eng = document.createElement('div');
+            eng.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:14px;margin-bottom:4px;';
+            eng.textContent = '❤️ ' + fmt(p.likes) + '   💬 ' + fmt(p.comments) + (p.isVideo ? '   🎬 Reel' : '');
+            bd.appendChild(eng);
+            if (p.caption) {
+                const cap = document.createElement('div');
+                cap.style.cssText = 'color:#555;font-size:13px;line-height:1.45;margin-bottom:8px;max-height:56px;overflow:hidden;';
+                cap.textContent = p.caption;
+                bd.appendChild(cap);
+            }
+            const actions = document.createElement('div');
+            actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
+            const open = document.createElement('a');
+            open.href = p.url; open.target = '_blank'; open.rel = 'noopener';
+            open.textContent = 'Open ↗';
+            open.style.cssText = 'text-decoration:none;padding:7px 12px;background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;border-radius:8px;font-weight:700;font-size:12px;';
+            actions.appendChild(open);
+            const analyze = document.createElement('button');
+            analyze.type = 'button'; analyze.textContent = '🎯 Analyze';
+            analyze.style.cssText = 'padding:7px 12px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;';
+            analyze.addEventListener('click', () => {
+                const a = document.getElementById('analyzeUrl');
+                if (a) a.value = p.url;
+                if (typeof switchTab === 'function') switchTab('analyze-tab');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+            actions.appendChild(analyze);
+            bd.appendChild(actions);
+            card.appendChild(bd);
+            wrap.appendChild(card);
+        });
+        results.appendChild(wrap);
+    }
+    async function run() {
+        const link = (input.value || '').trim();
+        if (!link) { setStatus('Paste an Instagram profile link or @handle.', false); return; }
+        if (typeof gateOrPaywall === 'function' && !gateOrPaywall()) return;
+        btn.disabled = true;
+        const orig = btn.textContent;
+        btn.textContent = '⏳ Finding…';
+        results.innerHTML = '';
+        setStatus('⏳ Pulling their posts & ranking by engagement (~30s)…', null);
+        try {
+            const started = await call({ url: link });
+            if (!started.runId) throw new Error(started.error || 'Could not start the lookup.');
+            const account = started.account || '';
+            const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+            let done = null;
+            for (let i = 0; i < 20; i++) {
+                await sleep(3000);
+                const p = await call({ runId: started.runId, datasetId: started.datasetId });
+                if (Array.isArray(p.posts)) { done = p.posts; break; }
+                if (p.error) throw new Error(p.error);
+                // else status:'running' — keep waiting
+            }
+            if (!done) throw new Error('Taking too long — try again, or check the handle.');
+            if (!done.length) throw new Error('No public posts found for that profile.');
+            render(done, account);
+            setStatus('✅ Ranked their recent posts by likes + comments.', true);
+        } catch (e) {
+            setStatus('❌ ' + (e.message || 'Lookup failed.'), false);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = orig;
+        }
+    }
+    btn.addEventListener('click', run);
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+})();
+
 // ── HEAVY VIDEO JOB TRANSPORT ─────────────────────────────────────
 // Scene-grab / transcribe / erase / transcode all POST multi-MB base64
 // bodies. Netlify Functions HARD-CAP both request and response at 6MB,
