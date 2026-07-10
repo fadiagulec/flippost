@@ -2907,8 +2907,11 @@ function showSuccess(msg, id) {
             section.appendChild(card);
         });
 
-        // ── Make it a 9-10: the specific fixes + a full rewritten version ──
-        if ((Array.isArray(data.fixes) && data.fixes.length) || data.rewrite) {
+        // ── Make it a 9-10: fixes, stronger hooks, best caption + alts, hashtags ──
+        const A = (x) => Array.isArray(x) ? x : [];
+        const hasUpgrade = A(data.fixes).length || data.rewrite || A(data.hooks).length
+            || A(data.altCaptions).length || A(data.recommendedHashtags).length;
+        if (hasUpgrade) {
             const up = document.createElement('div');
             up.style.cssText = 'margin-top:18px;padding-top:16px;border-top:2px dashed #e8e4de;';
             const uh = document.createElement('h4');
@@ -2916,9 +2919,31 @@ function showSuccess(msg, id) {
             uh.textContent = '🔧 Make it a 9–10';
             up.appendChild(uh);
 
-            if (Array.isArray(data.fixes) && data.fixes.length) {
+            // A labeled box with its own Copy button.
+            const copyBox = (label, text, bg) => {
+                if (label) {
+                    const l = document.createElement('div');
+                    l.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:14px;margin:14px 0 6px;';
+                    l.textContent = label;
+                    up.appendChild(l);
+                }
+                const box = document.createElement('div');
+                box.style.cssText = 'white-space:pre-wrap;background:' + (bg || '#f0faf8') + ';border:1px solid #bfe3dd;border-radius:10px;padding:12px;font-size:14px;line-height:1.6;color:#124;';
+                box.textContent = text;
+                up.appendChild(box);
+                const c = document.createElement('button');
+                c.textContent = '📋 Copy';
+                c.style.cssText = 'margin-top:6px;padding:8px 13px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
+                c.addEventListener('click', () => {
+                    navigator.clipboard.writeText(text).then(() => { c.textContent = '✅ Copied'; setTimeout(() => { c.textContent = '📋 Copy'; }, 1500); }).catch(() => {});
+                });
+                up.appendChild(c);
+            };
+
+            // Fixes
+            if (A(data.fixes).length) {
                 const ul = document.createElement('ul');
-                ul.style.cssText = 'margin:0 0 14px;padding-left:20px;';
+                ul.style.cssText = 'margin:0 0 8px;padding-left:20px;';
                 data.fixes.forEach(f => {
                     const li = document.createElement('li');
                     li.style.cssText = 'color:#333;font-size:14px;line-height:1.55;margin-bottom:7px;';
@@ -2928,25 +2953,36 @@ function showSuccess(msg, id) {
                 up.appendChild(ul);
             }
 
-            if (data.rewrite) {
-                const lbl = document.createElement('div');
-                lbl.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:14px;margin-bottom:6px;';
-                lbl.textContent = '✨ Rewritten to score 9–10';
-                up.appendChild(lbl);
-                const box = document.createElement('div');
-                box.style.cssText = 'white-space:pre-wrap;background:#f0faf8;border:1px solid #bfe3dd;border-radius:10px;padding:12px;font-size:14px;line-height:1.6;color:#124;';
-                box.textContent = data.rewrite;
-                up.appendChild(box);
-                const copy = document.createElement('button');
-                copy.textContent = '📋 Copy rewrite';
-                copy.style.cssText = 'margin-top:8px;padding:9px 14px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
-                copy.addEventListener('click', () => {
-                    navigator.clipboard.writeText(data.rewrite).then(() => {
-                        copy.textContent = '✅ Copied'; setTimeout(() => { copy.textContent = '📋 Copy rewrite'; }, 1500);
-                    }).catch(() => {});
+            // Stronger hooks — each copyable
+            if (A(data.hooks).length) {
+                const l = document.createElement('div');
+                l.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:14px;margin:14px 0 6px;';
+                l.textContent = '🪝 Stronger hooks (10/10 openers)';
+                up.appendChild(l);
+                data.hooks.forEach(h => {
+                    const row = document.createElement('div');
+                    row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;background:#faf8f5;border:1px solid #e8e4de;border-radius:8px;padding:9px 10px;margin-bottom:6px;';
+                    const t = document.createElement('div');
+                    t.style.cssText = 'flex:1;font-size:14px;color:#222;line-height:1.45;';
+                    t.textContent = h;
+                    const cp = document.createElement('button');
+                    cp.textContent = '📋'; cp.title = 'Copy hook';
+                    cp.style.cssText = 'flex:0 0 auto;padding:5px 9px;background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;border-radius:7px;font-size:12px;cursor:pointer;';
+                    cp.addEventListener('click', () => { navigator.clipboard.writeText(h).then(() => { cp.textContent = '✅'; setTimeout(() => { cp.textContent = '📋'; }, 1200); }).catch(() => {}); });
+                    row.appendChild(t); row.appendChild(cp);
+                    up.appendChild(row);
                 });
-                up.appendChild(copy);
             }
+
+            // Best caption (the rewrite) + alternatives
+            if (data.rewrite) copyBox('✅ Best caption — post this', data.rewrite);
+            A(data.altCaptions).forEach((c, i) => copyBox('✍️ Alternative caption ' + (i + 1), c, '#f7f9fb'));
+
+            // Recommended hashtags
+            if (A(data.recommendedHashtags).length) {
+                copyBox('🔖 Recommended hashtags', data.recommendedHashtags.join(' '), '#f7f9fb');
+            }
+
             section.appendChild(up);
         }
 
@@ -3958,17 +3994,37 @@ function showSuccess(msg, id) {
             body.appendChild(row);
         });
 
-        // Make it a 9-10: specific fixes + a rewritten version.
-        if ((Array.isArray(data.fixes) && data.fixes.length) || data.rewrite) {
+        // Make it a 9-10: fixes, stronger hooks, best caption + alts, hashtags.
+        const A = (x) => Array.isArray(x) ? x : [];
+        if (A(data.fixes).length || data.rewrite || A(data.hooks).length || A(data.altCaptions).length || A(data.recommendedHashtags).length) {
             const up = document.createElement('div');
             up.style.cssText = 'margin-top:14px;padding-top:12px;border-top:2px dashed #e8e4de;';
             const uh = document.createElement('div');
             uh.style.cssText = 'font-weight:800;color:#0d6e66;font-size:14px;margin-bottom:8px;';
             uh.textContent = '🔧 Make it a 9–10';
             up.appendChild(uh);
-            if (Array.isArray(data.fixes) && data.fixes.length) {
+
+            const copyBox = (label, text, bg) => {
+                if (label) {
+                    const l = document.createElement('div');
+                    l.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:13px;margin:12px 0 5px;';
+                    l.textContent = label;
+                    up.appendChild(l);
+                }
+                const box = document.createElement('div');
+                box.style.cssText = 'white-space:pre-wrap;background:' + (bg || '#f0faf8') + ';border:1px solid #bfe3dd;border-radius:10px;padding:11px;font-size:13px;line-height:1.55;color:#124;';
+                box.textContent = text;
+                up.appendChild(box);
+                const c = document.createElement('button');
+                c.textContent = '📋 Copy';
+                c.style.cssText = 'margin-top:6px;padding:7px 12px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer;';
+                c.addEventListener('click', () => { navigator.clipboard.writeText(text).then(() => { c.textContent = '✅ Copied'; setTimeout(() => { c.textContent = '📋 Copy'; }, 1500); }).catch(() => {}); });
+                up.appendChild(c);
+            };
+
+            if (A(data.fixes).length) {
                 const ul = document.createElement('ul');
-                ul.style.cssText = 'margin:0 0 12px;padding-left:18px;';
+                ul.style.cssText = 'margin:0 0 8px;padding-left:18px;';
                 data.fixes.forEach(f => {
                     const li = document.createElement('li');
                     li.style.cssText = 'color:#333;font-size:13px;line-height:1.5;margin-bottom:6px;';
@@ -3977,21 +4033,25 @@ function showSuccess(msg, id) {
                 });
                 up.appendChild(ul);
             }
-            if (data.rewrite) {
-                const box = document.createElement('div');
-                box.style.cssText = 'white-space:pre-wrap;background:#f0faf8;border:1px solid #bfe3dd;border-radius:10px;padding:11px;font-size:13px;line-height:1.55;color:#124;';
-                box.textContent = data.rewrite;
-                up.appendChild(box);
-                const copy = document.createElement('button');
-                copy.textContent = '📋 Copy rewrite';
-                copy.style.cssText = 'margin-top:8px;padding:8px 13px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
-                copy.addEventListener('click', () => {
-                    navigator.clipboard.writeText(data.rewrite).then(() => {
-                        copy.textContent = '✅ Copied'; setTimeout(() => { copy.textContent = '📋 Copy rewrite'; }, 1500);
-                    }).catch(() => {});
+            if (A(data.hooks).length) {
+                const l = document.createElement('div');
+                l.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:13px;margin:12px 0 5px;';
+                l.textContent = '🪝 Stronger hooks';
+                up.appendChild(l);
+                data.hooks.forEach(h => {
+                    const row = document.createElement('div');
+                    row.style.cssText = 'display:flex;gap:8px;align-items:flex-start;background:#faf8f5;border:1px solid #e8e4de;border-radius:8px;padding:8px 9px;margin-bottom:5px;';
+                    const t = document.createElement('div'); t.style.cssText = 'flex:1;font-size:13px;color:#222;line-height:1.4;'; t.textContent = h;
+                    const cp = document.createElement('button'); cp.textContent = '📋'; cp.title = 'Copy hook';
+                    cp.style.cssText = 'flex:0 0 auto;padding:4px 8px;background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;border-radius:7px;font-size:11px;cursor:pointer;';
+                    cp.addEventListener('click', () => { navigator.clipboard.writeText(h).then(() => { cp.textContent = '✅'; setTimeout(() => { cp.textContent = '📋'; }, 1200); }).catch(() => {}); });
+                    row.appendChild(t); row.appendChild(cp); up.appendChild(row);
                 });
-                up.appendChild(copy);
             }
+            if (data.rewrite) copyBox('✅ Best caption — post this', data.rewrite);
+            A(data.altCaptions).forEach((c, i) => copyBox('✍️ Alternative caption ' + (i + 1), c, '#f7f9fb'));
+            if (A(data.recommendedHashtags).length) copyBox('🔖 Recommended hashtags', data.recommendedHashtags.join(' '), '#f7f9fb');
+
             body.appendChild(up);
         }
     }

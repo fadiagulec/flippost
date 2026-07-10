@@ -32,7 +32,7 @@ const DIMENSIONS = [
 // throws → 500). Tool-use has the API validate the shape for us — no parsing.
 const SCORECARD_TOOL = {
     name: 'scorecard',
-    description: 'Return the viral scorecard for the post, plus specific fixes and a full rewrite engineered to score 9-10.',
+    description: 'Return the viral scorecard for the post, plus specific fixes, stronger hooks, a best caption + alternatives, and recommended hashtags.',
     input_schema: {
         type: 'object',
         properties: {
@@ -54,9 +54,12 @@ const SCORECARD_TOOL = {
                 }
             },
             fixes: { type: 'array', items: { type: 'string' }, description: '3-5 specific, copy-pasteable changes (actual replacement words, not advice)' },
-            rewrite: { type: 'string', description: 'the full post rewritten to score 9-10, ready to paste (line breaks and hashtags included)' }
+            hooks: { type: 'array', items: { type: 'string' }, description: '3 alternative FIRST-LINE hooks, each a scroll-stopper strong enough to score 10/10 on hook strength; vary the angle (curiosity gap, bold claim, relatable pain)' },
+            rewrite: { type: 'string', description: 'the single BEST full caption, rewritten to score 9-10, ready to paste (line breaks and hashtags included)' },
+            altCaptions: { type: 'array', items: { type: 'string' }, description: '2 alternative full captions, each a DIFFERENT angle from the rewrite; keep each tight (~60-90 words)' },
+            recommendedHashtags: { type: 'array', items: { type: 'string' }, description: '10-14 hashtags to actually use — a mix of broad-reach, niche, and branded; each WITHOUT the leading #' }
         },
-        required: ['score', 'verdict', 'summary', 'dimensions', 'fixes', 'rewrite']
+        required: ['score', 'verdict', 'summary', 'dimensions', 'fixes', 'hooks', 'rewrite', 'altCaptions', 'recommendedHashtags']
     }
 };
 
@@ -120,7 +123,11 @@ exports.handler = __wrapErr(async function (event) {
         "- platform_fit: Does the format/tone/length match the platform's norms (Instagram caption length, TikTok hook urgency, LinkedIn POV, etc.)?",
         "",
         "fixes: 3-5 highest-leverage, SPECIFIC changes — write the actual replacement words, not advice. 'Open with: \"I quit my $200k job — here's the math\"' NOT 'improve the hook'. Target the lowest-scoring dimensions first.",
-        "rewrite: rewrite the ENTIRE post applying every fix so it would genuinely score 9-10. Keep the creator's topic and meaning; upgrade the hook, structure, CTA, and hashtags. Output ready-to-post text with line breaks and hashtags as they'd actually be posted. Keep it TIGHT — aim for under ~120 words (only go longer if the original is a long spoken script).",
+        "hooks: 3 alternative FIRST-LINE hooks (opening line only), each a scroll-stopper that would score 10/10 on hook strength. Vary the angle — one curiosity gap, one bold claim/number, one relatable pain.",
+        "rewrite: the single BEST full caption — rewrite the ENTIRE post applying every fix so it would genuinely score 9-10 (aim for a 10). Keep the creator's topic and meaning; upgrade the hook, structure, CTA, and hashtags. Ready-to-post text with line breaks. Keep it TIGHT — under ~120 words (longer only if the original is a long spoken script).",
+        "altCaptions: 2 alternative full captions, each taking a DIFFERENT angle than the rewrite (e.g. story-led, list-led, contrarian). Keep each tight (~60-90 words), ready to paste.",
+        "recommendedHashtags: 10-14 hashtags the creator should actually use — a mix of broad-reach, niche, and branded. No spaces; no leading # needed.",
+        "If a <brand_voice> is given, write the hooks, rewrite, and altCaptions in THAT voice.",
         "",
         "Be fast and economical with words: keep each dimension 'comment' to ONE short sentence. Be honest — a truly mid post gets a 4 or 5, not a participation-trophy 7."
     ].join('\n');
@@ -134,7 +141,7 @@ exports.handler = __wrapErr(async function (event) {
         hashtags ? '\n<hashtags>\n' + hashtags + '\n</hashtags>' : '',
         voiceContext ? '\n<brand_voice>\n' + voiceContext + '\n</brand_voice>\nWrite the "rewrite" (and the wording inside "fixes") in THIS brand voice — match its tone, vocabulary, and personality so it sounds like this specific creator. Keep the scoring itself objective.' : '',
         '',
-        'Score it now and call the scorecard tool — include the specific "fixes" and the full "rewrite" that would score 9-10.'
+        'Score it now and call the scorecard tool — include the fixes, 3 stronger hooks, the best caption ("rewrite") plus 2 alternatives, and recommended hashtags.'
     ].filter(Boolean).join('\n');
 
     try {
@@ -147,7 +154,7 @@ exports.handler = __wrapErr(async function (event) {
             },
             body: JSON.stringify({
                 model: 'claude-sonnet-4-6',
-                max_tokens: 2600,
+                max_tokens: 3200,
                 temperature: 0.4,
                 system: systemPrompt,
                 tools: [SCORECARD_TOOL],
@@ -185,6 +192,15 @@ exports.handler = __wrapErr(async function (event) {
             ? parsed.fixes.filter(x => typeof x === 'string' && x.trim()).slice(0, 6).map(s => s.trim().slice(0, 400))
             : [];
         const rewrite = String(parsed.rewrite || '').trim().slice(0, 4000);
+        const hooks = Array.isArray(parsed.hooks)
+            ? parsed.hooks.filter(x => typeof x === 'string' && x.trim()).slice(0, 4).map(s => s.trim().slice(0, 300))
+            : [];
+        const altCaptions = Array.isArray(parsed.altCaptions)
+            ? parsed.altCaptions.filter(x => typeof x === 'string' && x.trim()).slice(0, 3).map(s => s.trim().slice(0, 2000))
+            : [];
+        const recommendedHashtags = Array.isArray(parsed.recommendedHashtags)
+            ? parsed.recommendedHashtags.filter(x => typeof x === 'string' && x.trim()).slice(0, 20).map(s => '#' + s.trim().replace(/^#+/, '').replace(/\s+/g, '').slice(0, 60))
+            : [];
         return {
             statusCode: 200,
             headers,
@@ -194,7 +210,10 @@ exports.handler = __wrapErr(async function (event) {
                 summary,
                 dimensions: cleanDims,
                 fixes,
-                rewrite
+                hooks,
+                rewrite,
+                altCaptions,
+                recommendedHashtags
             })
         };
     } catch (err) {
