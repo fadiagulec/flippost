@@ -2988,15 +2988,16 @@ function showSuccess(msg, id) {
 })();
 
 // ── PLUMB BRAND VOICE INTO EXISTING FETCHES ───────────────────────
-// Wraps window.fetch ONLY for the two backend functions that take
-// voiceContext (rewrite-script + image-prompts). Adds the active
-// voice's context to the JSON body if not already set. Leaves every
-// other fetch in the app untouched.
+// Wraps window.fetch for the backend functions that take voiceContext
+// (rewrite-script, image-prompts, viral-score). Adds the active voice's
+// context to the JSON body if not already set. viral-score uses it only for
+// the 9-10 rewrite; scoring stays objective. Leaves every other fetch alone.
 (function plumbVoiceIntoFetches() {
     const originalFetch = window.fetch;
     const VOICE_ROUTES = [
         '/.netlify/functions/rewrite-script',
-        '/.netlify/functions/image-prompts'
+        '/.netlify/functions/image-prompts',
+        '/.netlify/functions/viral-score'
     ];
     window.fetch = function (input, init) {
         try {

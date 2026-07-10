@@ -93,6 +93,9 @@ exports.handler = __wrapErr(async function (event) {
         ? body.platform.trim().toLowerCase()
         : 'instagram';
     const hashtags = String(body.hashtags || '').trim().slice(0, 2000);
+    // Optional brand voice — plumbed in by the frontend (FlipItVoice). When
+    // present, the REWRITE is written in this voice; scoring stays objective.
+    const voiceContext = String(body.voiceContext || '').trim().slice(0, 2000);
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
@@ -129,6 +132,7 @@ exports.handler = __wrapErr(async function (event) {
         caption,
         '</caption>',
         hashtags ? '\n<hashtags>\n' + hashtags + '\n</hashtags>' : '',
+        voiceContext ? '\n<brand_voice>\n' + voiceContext + '\n</brand_voice>\nWrite the "rewrite" (and the wording inside "fixes") in THIS brand voice — match its tone, vocabulary, and personality so it sounds like this specific creator. Keep the scoring itself objective.' : '',
         '',
         'Score it now and call the scorecard tool — include the specific "fixes" and the full "rewrite" that would score 9-10.'
     ].filter(Boolean).join('\n');
