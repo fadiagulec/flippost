@@ -83,10 +83,10 @@ exports.handler = __wrapErr(async function (event) {
         "- shareability: Would someone DM or repost this? Identity-statements, lists, before/after, controversial-but-true frames score high.",
         "- platform_fit: Does the format/tone/length match the platform's norms (Instagram caption length, TikTok hook urgency, LinkedIn POV, etc.)?",
         "",
-        "fixes: the highest-leverage, SPECIFIC changes — write the actual replacement words, not advice. 'Open with: \"I quit my $200k job — here's the math\"' NOT 'improve the hook'. Target the lowest-scoring dimensions first.",
-        "rewrite: rewrite the ENTIRE post applying every fix so it would genuinely score 9-10. Keep the creator's topic and meaning; upgrade the hook, structure, CTA, and hashtags. Output ready-to-post text (include line breaks and hashtags as they'd actually be posted).",
+        "fixes: 3-5 highest-leverage, SPECIFIC changes — write the actual replacement words, not advice. 'Open with: \"I quit my $200k job — here's the math\"' NOT 'improve the hook'. Target the lowest-scoring dimensions first.",
+        "rewrite: rewrite the ENTIRE post applying every fix so it would genuinely score 9-10. Keep the creator's topic and meaning; upgrade the hook, structure, CTA, and hashtags. Output ready-to-post text with line breaks and hashtags as they'd actually be posted. Keep it TIGHT — aim for under ~120 words (only go longer if the original is a long spoken script).",
         "",
-        "Be honest. A truly mid post should get a 4 or 5, not a participation-trophy 7."
+        "Be fast and economical with words: keep each dimension 'comment' to ONE short sentence. Be honest — a truly mid post gets a 4 or 5, not a participation-trophy 7."
     ].join('\n');
 
     const userPrompt = [
@@ -115,7 +115,7 @@ exports.handler = __wrapErr(async function (event) {
                 system: systemPrompt,
                 messages: [{ role: 'user', content: userPrompt }]
             }),
-            signal: AbortSignal.timeout(22000)
+            signal: AbortSignal.timeout(25000)
         });
         const data = await resp.json();
         if (!resp.ok) {
