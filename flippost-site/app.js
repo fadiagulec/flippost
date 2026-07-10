@@ -226,7 +226,7 @@ function switchTab(tabName) {
 
 // Maps each tool tab to its top-level page (Flip / Discover / Tools).
 const TAB_TO_PAGE = {
-    'url-tab': 'flip', 'script-tab': 'flip', 'transcribe-tab': 'flip', 'score-tab': 'flip',
+    'url-tab': 'flip', 'analyze-tab': 'flip', 'script-tab': 'flip', 'transcribe-tab': 'flip', 'score-tab': 'flip',
     'trending-tab': 'discover', 'instagram-tab': 'discover', 'ideas-tab': 'discover',
     'imgprompt-tab': 'tools', 'eraser-tab': 'tools', 'scenes-tab': 'tools', 'history-tab': 'tools'
 };
@@ -3310,6 +3310,7 @@ function showSuccess(msg, id) {
 (function routingModule() {
     const TAB_TO_HASH = {
         'url-tab': '#extract',
+        'analyze-tab': '#analyze',
         'trending-tab': '#discover',
         'instagram-tab': '#instagram',
         'script-tab': '#rewrite',
@@ -3775,6 +3776,207 @@ function showSuccess(msg, id) {
         urlBtn.addEventListener('click', runUrl);
         urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') runUrl(); });
     }
+})();
+
+// ── ANALYZE ALL (one link → transcript + scenes + viral score) ────
+// Paste a link once; run Transcribe, Scene Grabber and ViralScore together and
+// stack all three results so the user reviews everything in one place. Reuses
+// the global transports: resolveMediaLink() (IG → direct url), postHeavyJob()
+// (heavy Railway jobs), triggerSave() (iOS-safe image save). ViralScore has no
+// URL input, so it scores the TRANSCRIPT (the spoken script) once we have it.
+(function analyzeAllModule() {
+    const btn = document.getElementById('analyzeAllBtn');
+    if (!btn) return;
+    const urlInput = document.getElementById('analyzeUrl');
+    const modeSel = document.getElementById('analyzeMode');
+    const statusEl = document.getElementById('analyzeStatus');
+    const results = document.getElementById('analyzeResults');
+
+    function setStatus(msg, ok) {
+        statusEl.textContent = msg || '';
+        statusEl.style.color = ok === false ? '#c2185b' : (ok === true ? '#0d6e66' : '#555');
+    }
+    function platformFromUrl(u) {
+        if (/tiktok\.com|vm\.tiktok|vt\.tiktok/i.test(u)) return 'tiktok';
+        if (/youtube\.com|youtu\.be/i.test(u)) return 'youtube';
+        if (/instagram\.com|instagr\.am/i.test(u)) return 'instagram';
+        if (/twitter\.com|x\.com/i.test(u)) return 'x';
+        return 'instagram';
+    }
+    // Pre-create a titled card and return its body element to fill. All three
+    // cards appear immediately (with spinners) then fill in as each job
+    // finishes — so completion order never scrambles the layout.
+    function card(title) {
+        const c = document.createElement('div');
+        c.className = 'result-section';
+        c.style.cssText = 'margin-bottom:16px;';
+        const h = document.createElement('h4');
+        h.style.cssText = 'font-size:16px;color:#1a1a2e;margin:0 0 10px;';
+        h.textContent = title;
+        const body = document.createElement('div');
+        body.innerHTML = '<div class="loading">⏳ Working…</div>';
+        c.appendChild(h); c.appendChild(body);
+        results.appendChild(c);
+        return body;
+    }
+    function fail(body, msg) {
+        body.innerHTML = '';
+        const p = document.createElement('p');
+        p.style.cssText = 'color:#c2185b;font-size:14px;margin:0;';
+        p.textContent = '❌ ' + msg;
+        body.appendChild(p);
+    }
+    function renderTranscript(body, data) {
+        body.innerHTML = '';
+        const meta = document.createElement('div');
+        meta.style.cssText = 'font-size:12px;color:#888;margin-bottom:8px;';
+        meta.textContent = Math.round(data.duration || 0) + 's · ' + (data.language || 'audio');
+        const pre = document.createElement('div');
+        pre.style.cssText = 'white-space:pre-wrap;background:#faf8f5;border:1px solid #e8e4de;border-radius:10px;padding:12px;font-size:14px;line-height:1.6;color:#222;max-height:320px;overflow:auto;';
+        pre.textContent = data.transcript || '';
+        const copy = document.createElement('button');
+        copy.textContent = '📋 Copy script';
+        copy.style.cssText = 'margin-top:8px;padding:9px 14px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
+        copy.addEventListener('click', () => {
+            navigator.clipboard.writeText(data.transcript || '').then(() => {
+                copy.textContent = '✅ Copied'; setTimeout(() => { copy.textContent = '📋 Copy script'; }, 1500);
+            }).catch(() => {});
+        });
+        body.appendChild(meta); body.appendChild(pre); body.appendChild(copy);
+    }
+    function renderScenes(body, scenes, base) {
+        body.innerHTML = '';
+        const grid = document.createElement('div');
+        grid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;';
+        scenes.forEach(sc => {
+            const cell = document.createElement('div');
+            const img = document.createElement('img');
+            img.src = 'data:image/jpeg;base64,' + sc.base64;
+            img.style.cssText = 'width:100%;border-radius:8px;display:block;';
+            const dl = document.createElement('button');
+            dl.textContent = '⬇ Save';
+            dl.style.cssText = 'width:100%;margin-top:4px;padding:6px;background:#0d6e66;color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;';
+            dl.addEventListener('click', () => {
+                try {
+                    const bin = atob(sc.base64);
+                    const arr = new Uint8Array(bin.length);
+                    for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+                    const blob = new Blob([arr], { type: 'image/jpeg' });
+                    if (blob.size < 64) return;
+                    const u = URL.createObjectURL(blob);
+                    const fn = base + '-scene-' + String(sc.index).padStart(2, '0') + '.jpg';
+                    if (typeof triggerSave === 'function') triggerSave(u, 'image/jpeg', fn);
+                    else { const a = document.createElement('a'); a.href = u; a.download = fn; document.body.appendChild(a); a.click(); a.remove(); }
+                    setTimeout(() => URL.revokeObjectURL(u), 60000);
+                } catch (e) { /* ignore a single bad frame */ }
+            });
+            cell.appendChild(img); cell.appendChild(dl);
+            grid.appendChild(cell);
+        });
+        body.appendChild(grid);
+    }
+    function renderScore(body, data) {
+        body.innerHTML = '';
+        const s10 = Math.round(Number(data.score) * 10) / 10;
+        const col = s10 >= 8 ? '#0d6e66' : (s10 >= 6 ? '#d97706' : '#c2185b');
+        const top = document.createElement('div');
+        top.style.cssText = 'text-align:center;margin-bottom:10px;';
+        top.innerHTML = '<div style="font-size:40px;font-weight:800;color:' + col + ';line-height:1;">' + s10 + '<span style="font-size:16px;color:#888;">/10</span></div><div style="font-weight:700;color:' + col + ';margin-top:4px;"></div>';
+        top.lastChild.textContent = data.verdict || '';
+        body.appendChild(top);
+        if (data.summary) {
+            const sum = document.createElement('p');
+            sum.style.cssText = 'color:#444;font-size:13px;line-height:1.5;text-align:center;margin:0 0 12px;';
+            sum.textContent = data.summary;
+            body.appendChild(sum);
+        }
+        (data.dimensions || []).forEach(d => {
+            const c = d.score >= 80 ? '#0d6e66' : (d.score >= 60 ? '#d97706' : '#c2185b');
+            const row = document.createElement('div');
+            row.style.cssText = 'margin-bottom:8px;';
+            const head = document.createElement('div');
+            head.style.cssText = 'display:flex;justify-content:space-between;font-size:13px;font-weight:600;color:#1a1a2e;';
+            const lbl = document.createElement('span'); lbl.textContent = d.label;
+            const val = document.createElement('span'); val.style.color = c; val.textContent = String(d.score);
+            head.appendChild(lbl); head.appendChild(val);
+            const barWrap = document.createElement('div');
+            barWrap.style.cssText = 'height:5px;background:#e8e4de;border-radius:999px;margin:4px 0;overflow:hidden;';
+            const bar = document.createElement('div');
+            bar.style.cssText = 'height:100%;background:' + c + ';width:' + Math.max(0, Math.min(100, d.score)) + '%;';
+            barWrap.appendChild(bar);
+            row.appendChild(head); row.appendChild(barWrap);
+            if (d.comment) {
+                const cm = document.createElement('div');
+                cm.style.cssText = 'font-size:12px;color:#555;line-height:1.45;';
+                cm.textContent = d.comment;
+                row.appendChild(cm);
+            }
+            body.appendChild(row);
+        });
+    }
+
+    async function run() {
+        const link = (urlInput.value || '').trim();
+        if (!/^https?:\/\//i.test(link)) { setStatus('Paste a valid video link (TikTok, YouTube, Instagram).', false); return; }
+        if (typeof gateOrPaywall === 'function' && !gateOrPaywall()) return;
+        btn.disabled = true;
+        const orig = btn.textContent;
+        btn.textContent = '⏳ Analyzing…';
+        results.innerHTML = '';
+        const tBody = card('🎙️ Spoken Script');
+        const scBody = card('🎞️ Scenes');
+        const vBody = card('🔥 Viral Score (of the script)');
+
+        // Resolve Instagram ONCE so all three jobs reuse the same direct url
+        // (one Apify run, not three). Non-IG links pass straight through.
+        let url = link;
+        try {
+            if (/instagram\.com|instagr\.am/i.test(link)) setStatus('⏳ Finding the Instagram video…', null);
+            url = await resolveMediaLink(link);
+        } catch (e) {
+            const msg = e.message || 'Could not fetch that link.';
+            fail(tBody, msg); fail(scBody, msg); fail(vBody, msg);
+            setStatus('❌ ' + msg, false);
+            btn.disabled = false; btn.textContent = orig; return;
+        }
+
+        setStatus('⏳ Transcribing, grabbing scenes & scoring…', null);
+        const mode = (modeSel && modeSel.value) || 'scene';
+        const base = (link.split('/').filter(Boolean).pop() || 'flipit').replace(/[^a-z0-9]+/gi, '-').slice(0, 40);
+
+        // Scenes — independent job, runs in parallel with transcribe.
+        const scenesP = postHeavyJob('/extract-scenes-url', '/.netlify/functions/extract-scenes-url', { url, mode })
+            .then(d => {
+                if (!d.success || !Array.isArray(d.scenes) || !d.scenes.length) throw new Error(d.error || 'No scenes detected.');
+                renderScenes(scBody, d.scenes, base);
+            })
+            .catch(e => fail(scBody, e.message || 'Scene grab failed.'));
+
+        // Transcript — then score the spoken script it produces.
+        const transP = postHeavyJob('/transcribe-url', '/.netlify/functions/transcribe-url', { url })
+            .then(async d => {
+                if (!d.success || !d.transcript) throw new Error(d.error || 'No transcript returned.');
+                renderTranscript(tBody, d);
+                try {
+                    const res = await fetch('/.netlify/functions/viral-score', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ caption: d.transcript, platform: platformFromUrl(link), hashtags: '' })
+                    });
+                    const sd = await res.json();
+                    if (!res.ok) throw new Error(sd.error || ('Server returned ' + res.status));
+                    renderScore(vBody, sd);
+                } catch (e) { fail(vBody, e.message || 'Scoring failed.'); }
+            })
+            .catch(e => { fail(tBody, e.message || 'Transcribe failed.'); fail(vBody, 'Needs the script first — transcription failed.'); });
+
+        await Promise.allSettled([scenesP, transP]);
+        setStatus('✅ Done — review each section below and keep what you want.', true);
+        btn.disabled = false; btn.textContent = orig;
+    }
+
+    btn.addEventListener('click', run);
+    urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
 })();
 
 // ── HEAVY VIDEO JOB TRANSPORT ─────────────────────────────────────
