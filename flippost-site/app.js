@@ -2907,6 +2907,49 @@ function showSuccess(msg, id) {
             section.appendChild(card);
         });
 
+        // ── Make it a 9-10: the specific fixes + a full rewritten version ──
+        if ((Array.isArray(data.fixes) && data.fixes.length) || data.rewrite) {
+            const up = document.createElement('div');
+            up.style.cssText = 'margin-top:18px;padding-top:16px;border-top:2px dashed #e8e4de;';
+            const uh = document.createElement('h4');
+            uh.style.cssText = 'font-size:16px;color:#0d6e66;margin:0 0 10px;';
+            uh.textContent = '🔧 Make it a 9–10';
+            up.appendChild(uh);
+
+            if (Array.isArray(data.fixes) && data.fixes.length) {
+                const ul = document.createElement('ul');
+                ul.style.cssText = 'margin:0 0 14px;padding-left:20px;';
+                data.fixes.forEach(f => {
+                    const li = document.createElement('li');
+                    li.style.cssText = 'color:#333;font-size:14px;line-height:1.55;margin-bottom:7px;';
+                    li.textContent = f;
+                    ul.appendChild(li);
+                });
+                up.appendChild(ul);
+            }
+
+            if (data.rewrite) {
+                const lbl = document.createElement('div');
+                lbl.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:14px;margin-bottom:6px;';
+                lbl.textContent = '✨ Rewritten to score 9–10';
+                up.appendChild(lbl);
+                const box = document.createElement('div');
+                box.style.cssText = 'white-space:pre-wrap;background:#f0faf8;border:1px solid #bfe3dd;border-radius:10px;padding:12px;font-size:14px;line-height:1.6;color:#124;';
+                box.textContent = data.rewrite;
+                up.appendChild(box);
+                const copy = document.createElement('button');
+                copy.textContent = '📋 Copy rewrite';
+                copy.style.cssText = 'margin-top:8px;padding:9px 14px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
+                copy.addEventListener('click', () => {
+                    navigator.clipboard.writeText(data.rewrite).then(() => {
+                        copy.textContent = '✅ Copied'; setTimeout(() => { copy.textContent = '📋 Copy rewrite'; }, 1500);
+                    }).catch(() => {});
+                });
+                up.appendChild(copy);
+            }
+            section.appendChild(up);
+        }
+
         host.appendChild(section);
     }
 
@@ -3913,6 +3956,43 @@ function showSuccess(msg, id) {
             }
             body.appendChild(row);
         });
+
+        // Make it a 9-10: specific fixes + a rewritten version.
+        if ((Array.isArray(data.fixes) && data.fixes.length) || data.rewrite) {
+            const up = document.createElement('div');
+            up.style.cssText = 'margin-top:14px;padding-top:12px;border-top:2px dashed #e8e4de;';
+            const uh = document.createElement('div');
+            uh.style.cssText = 'font-weight:800;color:#0d6e66;font-size:14px;margin-bottom:8px;';
+            uh.textContent = '🔧 Make it a 9–10';
+            up.appendChild(uh);
+            if (Array.isArray(data.fixes) && data.fixes.length) {
+                const ul = document.createElement('ul');
+                ul.style.cssText = 'margin:0 0 12px;padding-left:18px;';
+                data.fixes.forEach(f => {
+                    const li = document.createElement('li');
+                    li.style.cssText = 'color:#333;font-size:13px;line-height:1.5;margin-bottom:6px;';
+                    li.textContent = f;
+                    ul.appendChild(li);
+                });
+                up.appendChild(ul);
+            }
+            if (data.rewrite) {
+                const box = document.createElement('div');
+                box.style.cssText = 'white-space:pre-wrap;background:#f0faf8;border:1px solid #bfe3dd;border-radius:10px;padding:11px;font-size:13px;line-height:1.55;color:#124;';
+                box.textContent = data.rewrite;
+                up.appendChild(box);
+                const copy = document.createElement('button');
+                copy.textContent = '📋 Copy rewrite';
+                copy.style.cssText = 'margin-top:8px;padding:8px 13px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
+                copy.addEventListener('click', () => {
+                    navigator.clipboard.writeText(data.rewrite).then(() => {
+                        copy.textContent = '✅ Copied'; setTimeout(() => { copy.textContent = '📋 Copy rewrite'; }, 1500);
+                    }).catch(() => {});
+                });
+                up.appendChild(copy);
+            }
+            body.appendChild(up);
+        }
     }
 
     async function run() {

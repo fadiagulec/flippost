@@ -71,7 +71,7 @@ exports.handler = __wrapErr(async function (event) {
         "You score each dimension from 0–100 based on what's in the caption, NOT on what's missing from the question. If the caption has no clear CTA, that's a low CTA score.",
         "",
         "OUTPUT JSON ONLY. No preamble, no markdown fences, no commentary. The exact shape:",
-        '{"score": <0-10 number, average of dimension scores rescaled>, "verdict": "<one of: Needs Work | Decent | Good — Minor Tweaks | Strong | Viral-Ready>", "summary": "<2-3 sentence overall take>", "dimensions": [{"key": "<dim key>", "label": "<dim label>", "score": <0-100>, "comment": "<one specific sentence — what worked, what to change, with concrete examples>"}]}',
+        '{"score": <0-10 number, average of dimension scores rescaled>, "verdict": "<one of: Needs Work | Decent | Good — Minor Tweaks | Strong | Viral-Ready>", "summary": "<2-3 sentence overall take>", "dimensions": [{"key": "<dim key>", "label": "<dim label>", "score": <0-100>, "comment": "<one specific sentence — what worked, what to change, with concrete examples>"}], "fixes": ["<3-5 SPECIFIC, copy-pasteable changes that would push the weakest dimensions to 90+ — write the ACTUAL replacement words, not advice>"], "rewrite": "<a full rewritten version of THIS post engineered to score 9-10: killer hook line, emotional pull, clear friction-free CTA, right length + hashtags for the platform. Ready to paste as-is.>"}',
         "",
         "Dimensions you MUST score (use these exact keys): hook, emotion, cta, hashtags, shareability, platform_fit.",
         "",
@@ -82,6 +82,9 @@ exports.handler = __wrapErr(async function (event) {
         "- hashtags: Mix of broad + niche + branded. Too few or all-broad = low. None given when platform expects them = low.",
         "- shareability: Would someone DM or repost this? Identity-statements, lists, before/after, controversial-but-true frames score high.",
         "- platform_fit: Does the format/tone/length match the platform's norms (Instagram caption length, TikTok hook urgency, LinkedIn POV, etc.)?",
+        "",
+        "fixes: the highest-leverage, SPECIFIC changes — write the actual replacement words, not advice. 'Open with: \"I quit my $200k job — here's the math\"' NOT 'improve the hook'. Target the lowest-scoring dimensions first.",
+        "rewrite: rewrite the ENTIRE post applying every fix so it would genuinely score 9-10. Keep the creator's topic and meaning; upgrade the hook, structure, CTA, and hashtags. Output ready-to-post text (include line breaks and hashtags as they'd actually be posted).",
         "",
         "Be honest. A truly mid post should get a 4 or 5, not a participation-trophy 7."
     ].join('\n');
@@ -94,7 +97,7 @@ exports.handler = __wrapErr(async function (event) {
         '</caption>',
         hashtags ? '\n<hashtags>\n' + hashtags + '\n</hashtags>' : '',
         '',
-        'Output the JSON scorecard now.'
+        'Output the JSON scorecard now — including the specific "fixes" and the full "rewrite" that would score 9-10.'
     ].filter(Boolean).join('\n');
 
     try {
@@ -107,7 +110,7 @@ exports.handler = __wrapErr(async function (event) {
             },
             body: JSON.stringify({
                 model: 'claude-sonnet-4-6',
-                max_tokens: 1500,
+                max_tokens: 2600,
                 temperature: 0.4,
                 system: systemPrompt,
                 messages: [{ role: 'user', content: userPrompt }]
@@ -142,6 +145,10 @@ exports.handler = __wrapErr(async function (event) {
                 comment: String(found.comment || '').slice(0, 400)
             };
         });
+        const fixes = Array.isArray(parsed.fixes)
+            ? parsed.fixes.filter(x => typeof x === 'string' && x.trim()).slice(0, 6).map(s => s.trim().slice(0, 400))
+            : [];
+        const rewrite = String(parsed.rewrite || '').trim().slice(0, 4000);
         return {
             statusCode: 200,
             headers,
@@ -149,7 +156,9 @@ exports.handler = __wrapErr(async function (event) {
                 score: Math.max(0, Math.min(10, Number.isFinite(score) ? score : 5)),
                 verdict: verdict || 'Decent',
                 summary,
-                dimensions: cleanDims
+                dimensions: cleanDims,
+                fixes,
+                rewrite
             })
         };
     } catch (err) {
