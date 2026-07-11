@@ -4314,6 +4314,21 @@ function showSuccess(msg, id) {
         persist(saved);
         renderAll();
     }
+    // Shared core: start the run + poll until posts arrive. Returns
+    // { account, posts, recent } or throws a friendly error.
+    async function pullProfile(link) {
+        const started = await call({ url: link });
+        if (!started.runId) throw new Error(started.error || 'Could not start the lookup.');
+        const account = started.account || '';
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+        for (let i = 0; i < 20; i++) {
+            await sleep(3000);
+            const p = await call({ runId: started.runId, datasetId: started.datasetId });
+            if (Array.isArray(p.posts)) return { account, posts: p.posts, recent: Array.isArray(p.recent) ? p.recent : [] };
+            if (p.error) throw new Error(p.error);
+        }
+        throw new Error('Taking too long — try again, or check the handle.');
+    }
     async function run() {
         const link = (input.value || '').trim();
         if (!link) { setStatus('Paste an Instagram profile link or @handle.', false); return; }
@@ -4324,21 +4339,9 @@ function showSuccess(msg, id) {
         // Note: do NOT clear results here — previously-saved scrapes stay on the page.
         setStatus('⏳ Pulling their posts — top viral + most recent (~30s)…', null);
         try {
-            const started = await call({ url: link });
-            if (!started.runId) throw new Error(started.error || 'Could not start the lookup.');
-            const account = started.account || '';
-            const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-            let done = null, recent = null;
-            for (let i = 0; i < 20; i++) {
-                await sleep(3000);
-                const p = await call({ runId: started.runId, datasetId: started.datasetId });
-                if (Array.isArray(p.posts)) { done = p.posts; recent = Array.isArray(p.recent) ? p.recent : []; break; }
-                if (p.error) throw new Error(p.error);
-                // else status:'running' — keep waiting
-            }
-            if (!done) throw new Error('Taking too long — try again, or check the handle.');
-            if (!done.length) throw new Error('No public posts found for that profile.');
-            saveScrape(account, done, recent);   // persists + renders; stays on the page
+            const r = await pullProfile(link);
+            if (!r.posts.length) throw new Error('No public posts found for that profile.');
+            saveScrape(r.account, r.posts, r.recent);   // persists + renders; stays on the page
             setStatus('✅ Saved to the page — hit ✕ Delete on any set when you\'re done.', true);
             if (input) input.value = '';
         } catch (e) {
@@ -4348,9 +4351,81 @@ function showSuccess(msg, id) {
             btn.textContent = orig;
         }
     }
+
+    // ── Watchlist: save creators, pull their top 4 viral in one tap ──
+    const WL_KEY = 'flipit_watchlist';
+    const WL_MAX = 12;
+    const addBtn = document.getElementById('watchlistAddBtn');
+    const pullBtn = document.getElementById('watchlistPullBtn');
+    const chipsEl = document.getElementById('watchlistChips');
+    function loadWatchlist() {
+        try { const a = JSON.parse(localStorage.getItem(WL_KEY) || '[]'); return Array.isArray(a) ? a : []; }
+        catch (e) { return []; }
+    }
+    function saveWatchlist(a) { try { localStorage.setItem(WL_KEY, JSON.stringify(a.slice(0, WL_MAX))); } catch (e) { /* quota */ } }
+    let watchlist = loadWatchlist();
+    function normalizeHandle(raw) {
+        const q = (raw || '').trim();
+        if (!q) return '';
+        const m = q.match(/instagram\.com\/([A-Za-z0-9._]+)/i);
+        const h = m ? m[1] : q.replace(/^@/, '');
+        return h.replace(/[^A-Za-z0-9._]/g, '').toLowerCase().slice(0, 40);
+    }
+    function renderChips() {
+        if (!chipsEl) return;
+        chipsEl.innerHTML = '';
+        if (!watchlist.length) {
+            const empty = document.createElement('span');
+            empty.style.cssText = 'font-size:12px;color:#aaa;';
+            empty.textContent = 'No creators yet — add some above.';
+            chipsEl.appendChild(empty);
+            return;
+        }
+        watchlist.forEach(h => {
+            const chip = document.createElement('span');
+            chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;background:#f0faf8;border:1px solid #bfe3dd;border-radius:999px;padding:5px 8px 5px 11px;font-size:13px;color:#124;';
+            const t = document.createElement('span'); t.textContent = '@' + h;
+            const x = document.createElement('button');
+            x.type = 'button'; x.textContent = '✕'; x.title = 'Remove';
+            x.style.cssText = 'border:none;background:transparent;color:#0d6e66;font-size:13px;line-height:1;cursor:pointer;padding:0 2px;';
+            x.addEventListener('click', () => { watchlist = watchlist.filter(w => w !== h); saveWatchlist(watchlist); renderChips(); });
+            chip.appendChild(t); chip.appendChild(x);
+            chipsEl.appendChild(chip);
+        });
+    }
+    function addToWatchlist() {
+        const h = normalizeHandle(input.value);
+        if (!h) { setStatus('Type a creator handle or profile link to add.', false); return; }
+        if (watchlist.includes(h)) { setStatus('@' + h + ' is already on your watchlist.', null); if (input) input.value = ''; return; }
+        if (watchlist.length >= WL_MAX) { setStatus('Watchlist is full (' + WL_MAX + '). Remove one first.', false); return; }
+        watchlist.push(h); saveWatchlist(watchlist); renderChips();
+        setStatus('⭐ Added @' + h + ' to your watchlist.', true);
+        if (input) input.value = '';
+    }
+    async function pullWatchlist() {
+        if (!watchlist.length) { setStatus('Add creators to your watchlist first.', false); return; }
+        if (typeof gateOrPaywall === 'function' && !gateOrPaywall()) return;
+        const list = watchlist.slice();
+        pullBtn.disabled = true; btn.disabled = true;
+        let done = 0, failed = 0;
+        const tick = () => setStatus('🗓️ Pulling ' + list.length + ' creator' + (list.length === 1 ? '' : 's') + '… ' + done + '/' + list.length + ' done (~40s)', null);
+        tick();
+        // Pull all in parallel; each saves its top-4 block as it finishes.
+        await Promise.allSettled(list.map(h =>
+            pullProfile('@' + h)
+                .then(r => { if (r.posts && r.posts.length) saveScrape(r.account || ('@' + h), r.posts.slice(0, 4), []); done++; tick(); })
+                .catch(() => { failed++; done++; tick(); })
+        ));
+        pullBtn.disabled = false; btn.disabled = false;
+        setStatus('✅ Watchlist pulled — top 4 viral each' + (failed ? ' (' + failed + ' couldn\'t load)' : '') + '. Tap 🎯 Analyze on any post to prep it.', failed ? null : true);
+    }
+
+    if (addBtn) addBtn.addEventListener('click', addToWatchlist);
+    if (pullBtn) pullBtn.addEventListener('click', pullWatchlist);
     btn.addEventListener('click', run);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
-    renderAll(); // restore previously-saved scrapes on page load
+    renderChips();      // show saved watchlist
+    renderAll();        // restore previously-saved scrapes on page load
 })();
 
 // ── HEAVY VIDEO JOB TRANSPORT ─────────────────────────────────────
