@@ -4157,65 +4157,87 @@ function showSuccess(msg, id) {
         if (!resp.ok) throw new Error(data.error || ('Lookup error (' + resp.status + ').'));
         return data;
     }
-    function render(posts, account) {
-        results.innerHTML = '';
+    function dateLabel(iso) {
+        if (!iso) return '';
+        const t = Date.parse(iso);
+        if (!t) return '';
+        try { return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }); }
+        catch (e) { return ''; }
+    }
+    function buildCard(p, i) {
+        const card = document.createElement('div');
+        card.style.cssText = 'display:flex;gap:12px;background:#faf8f5;border:1px solid #e8e4de;border-radius:12px;padding:12px;margin-bottom:10px;';
+        const left = document.createElement('div');
+        left.style.cssText = 'flex:0 0 88px;position:relative;';
+        const rank = document.createElement('div');
+        rank.style.cssText = 'position:absolute;top:4px;left:4px;background:#0d6e66;color:#fff;font-weight:800;font-size:12px;padding:2px 7px;border-radius:999px;z-index:1;';
+        rank.textContent = '#' + (i + 1);
+        left.appendChild(rank);
+        if (p.thumbnail) {
+            const img = document.createElement('img');
+            img.src = p.thumbnail; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
+            img.style.cssText = 'width:88px;height:88px;object-fit:cover;border-radius:8px;display:block;background:#eee;';
+            img.onerror = function () { this.style.display = 'none'; };
+            left.appendChild(img);
+        }
+        card.appendChild(left);
+        const bd = document.createElement('div');
+        bd.style.cssText = 'flex:1;min-width:0;';
+        const eng = document.createElement('div');
+        eng.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:14px;margin-bottom:2px;';
+        eng.textContent = '❤️ ' + fmt(p.likes) + '   💬 ' + fmt(p.comments) + (p.isVideo ? '   🎬 Reel' : '');
+        bd.appendChild(eng);
+        const dl = dateLabel(p.postedAt);
+        if (dl) {
+            const dt = document.createElement('div');
+            dt.style.cssText = 'font-size:11px;color:#999;margin-bottom:6px;';
+            dt.textContent = '📅 ' + dl;
+            bd.appendChild(dt);
+        }
+        if (p.caption) {
+            const cap = document.createElement('div');
+            cap.style.cssText = 'color:#555;font-size:13px;line-height:1.45;margin-bottom:8px;max-height:56px;overflow:hidden;';
+            cap.textContent = p.caption;
+            bd.appendChild(cap);
+        }
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
+        const open = document.createElement('a');
+        open.href = p.url; open.target = '_blank'; open.rel = 'noopener';
+        open.textContent = 'Open ↗';
+        open.style.cssText = 'text-decoration:none;padding:7px 12px;background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;border-radius:8px;font-weight:700;font-size:12px;';
+        actions.appendChild(open);
+        const analyze = document.createElement('button');
+        analyze.type = 'button'; analyze.textContent = '🎯 Analyze';
+        analyze.style.cssText = 'padding:7px 12px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;';
+        analyze.addEventListener('click', () => {
+            const a = document.getElementById('analyzeUrl');
+            if (a) a.value = p.url;
+            if (typeof switchTab === 'function') switchTab('analyze-tab');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+        actions.appendChild(analyze);
+        bd.appendChild(actions);
+        card.appendChild(bd);
+        return card;
+    }
+    function renderList(title, posts) {
         const wrap = document.createElement('div');
         wrap.className = 'result-section';
+        wrap.style.cssText = 'margin-bottom:18px;';
         const h = document.createElement('h4');
         h.style.cssText = 'font-size:16px;color:#1a1a2e;margin:0 0 12px;';
-        h.textContent = '🏆 Top ' + posts.length + ' viral posts' + (account ? ' — ' + account : '');
+        h.textContent = title;
         wrap.appendChild(h);
-        posts.forEach((p, i) => {
-            const card = document.createElement('div');
-            card.style.cssText = 'display:flex;gap:12px;background:#faf8f5;border:1px solid #e8e4de;border-radius:12px;padding:12px;margin-bottom:10px;';
-            const left = document.createElement('div');
-            left.style.cssText = 'flex:0 0 88px;position:relative;';
-            const rank = document.createElement('div');
-            rank.style.cssText = 'position:absolute;top:4px;left:4px;background:#0d6e66;color:#fff;font-weight:800;font-size:12px;padding:2px 7px;border-radius:999px;z-index:1;';
-            rank.textContent = '#' + (i + 1);
-            left.appendChild(rank);
-            if (p.thumbnail) {
-                const img = document.createElement('img');
-                img.src = p.thumbnail; img.loading = 'lazy'; img.referrerPolicy = 'no-referrer';
-                img.style.cssText = 'width:88px;height:88px;object-fit:cover;border-radius:8px;display:block;background:#eee;';
-                img.onerror = function () { this.style.display = 'none'; };
-                left.appendChild(img);
-            }
-            card.appendChild(left);
-            const bd = document.createElement('div');
-            bd.style.cssText = 'flex:1;min-width:0;';
-            const eng = document.createElement('div');
-            eng.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:14px;margin-bottom:4px;';
-            eng.textContent = '❤️ ' + fmt(p.likes) + '   💬 ' + fmt(p.comments) + (p.isVideo ? '   🎬 Reel' : '');
-            bd.appendChild(eng);
-            if (p.caption) {
-                const cap = document.createElement('div');
-                cap.style.cssText = 'color:#555;font-size:13px;line-height:1.45;margin-bottom:8px;max-height:56px;overflow:hidden;';
-                cap.textContent = p.caption;
-                bd.appendChild(cap);
-            }
-            const actions = document.createElement('div');
-            actions.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;';
-            const open = document.createElement('a');
-            open.href = p.url; open.target = '_blank'; open.rel = 'noopener';
-            open.textContent = 'Open ↗';
-            open.style.cssText = 'text-decoration:none;padding:7px 12px;background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;border-radius:8px;font-weight:700;font-size:12px;';
-            actions.appendChild(open);
-            const analyze = document.createElement('button');
-            analyze.type = 'button'; analyze.textContent = '🎯 Analyze';
-            analyze.style.cssText = 'padding:7px 12px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;';
-            analyze.addEventListener('click', () => {
-                const a = document.getElementById('analyzeUrl');
-                if (a) a.value = p.url;
-                if (typeof switchTab === 'function') switchTab('analyze-tab');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-            });
-            actions.appendChild(analyze);
-            bd.appendChild(actions);
-            card.appendChild(bd);
-            wrap.appendChild(card);
-        });
-        results.appendChild(wrap);
+        posts.forEach((p, i) => wrap.appendChild(buildCard(p, i)));
+        return wrap;
+    }
+    function render(topPosts, recentPosts, account) {
+        results.innerHTML = '';
+        results.appendChild(renderList('🏆 Top ' + topPosts.length + ' viral' + (account ? ' — ' + account : ''), topPosts));
+        if (Array.isArray(recentPosts) && recentPosts.length) {
+            results.appendChild(renderList('🆕 Most recent', recentPosts));
+        }
     }
     async function run() {
         const link = (input.value || '').trim();
@@ -4225,24 +4247,24 @@ function showSuccess(msg, id) {
         const orig = btn.textContent;
         btn.textContent = '⏳ Finding…';
         results.innerHTML = '';
-        setStatus('⏳ Pulling their posts & ranking by engagement (~30s)…', null);
+        setStatus('⏳ Pulling their posts — top viral + most recent (~30s)…', null);
         try {
             const started = await call({ url: link });
             if (!started.runId) throw new Error(started.error || 'Could not start the lookup.');
             const account = started.account || '';
             const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-            let done = null;
+            let done = null, recent = null;
             for (let i = 0; i < 20; i++) {
                 await sleep(3000);
                 const p = await call({ runId: started.runId, datasetId: started.datasetId });
-                if (Array.isArray(p.posts)) { done = p.posts; break; }
+                if (Array.isArray(p.posts)) { done = p.posts; recent = Array.isArray(p.recent) ? p.recent : []; break; }
                 if (p.error) throw new Error(p.error);
                 // else status:'running' — keep waiting
             }
             if (!done) throw new Error('Taking too long — try again, or check the handle.');
             if (!done.length) throw new Error('No public posts found for that profile.');
-            render(done, account);
-            setStatus('✅ Ranked their recent posts by likes + comments.', true);
+            render(done, recent, account);
+            setStatus('✅ Top viral + most recent.', true);
         } catch (e) {
             setStatus('❌ ' + (e.message || 'Lookup failed.'), false);
         } finally {

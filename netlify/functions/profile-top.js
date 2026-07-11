@@ -15,8 +15,8 @@ const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 const { assertPublicUrl } = require('./_ssrf_guard');
 
 const APIFY_ACTOR = 'apify~instagram-scraper';
-const SCRAPE_LIMIT = 30; // pull ~30 recent posts to rank the top 5 from
-const TOP_N = 5;
+const SCRAPE_LIMIT = 36; // pull ~36 recent posts to rank from
+const TOP_N = 6;         // top 6 by engagement + 6 most recent
 
 exports.handler = __wrapErr(async (event) => {
   const isPro = isProRequest(event);
@@ -176,8 +176,11 @@ async function pollRun(apifyToken, runId, datasetId) {
 
     const posts = items.map(normalizePost).filter(Boolean);
     if (!posts.length) return { error: 'No usable posts found on that profile.' };
-    posts.sort((a, b) => (b.likes + b.comments) - (a.likes + a.comments));
-    return { posts: posts.slice(0, TOP_N) };
+    // Top by engagement (all-time within the scraped window)…
+    const topViral = [...posts].sort((a, b) => (b.likes + b.comments) - (a.likes + a.comments)).slice(0, TOP_N);
+    // …and the most recent, so the picture stays current/relevant.
+    const mostRecent = [...posts].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, TOP_N);
+    return { posts: topViral, recent: mostRecent };
   } finally { clearTimeout(timeout); }
 }
 
@@ -197,6 +200,12 @@ function normalizePost(item) {
   const owner = item.ownerUsername || item.owner || '';
   const type = String(item.type || '').toLowerCase();
 
+  // Posted-at → epoch ms, for the "most recent" sort + a date label.
+  let postedAt = null, ts = 0;
+  if (typeof item.timestamp === 'string') { postedAt = item.timestamp; ts = Date.parse(item.timestamp) || 0; }
+  else if (typeof item.takenAt === 'string') { postedAt = item.takenAt; ts = Date.parse(item.takenAt) || 0; }
+  else if (typeof item.takenAtTimestamp === 'number' && item.takenAtTimestamp > 0) { ts = item.takenAtTimestamp * 1000; postedAt = new Date(ts).toISOString(); }
+
   return {
     url,
     thumbnail,
@@ -205,6 +214,8 @@ function normalizePost(item) {
     likes: Number(item.likesCount || item.likes || 0) || 0,
     comments: Number(item.commentsCount || item.comments || 0) || 0,
     isVideo: type === 'video' || !!item.videoUrl,
-    isCarousel: type === 'sidecar' || (Array.isArray(item.childPosts) && item.childPosts.length > 0)
+    isCarousel: type === 'sidecar' || (Array.isArray(item.childPosts) && item.childPosts.length > 0),
+    postedAt,
+    ts
   };
 }
