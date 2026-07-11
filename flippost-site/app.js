@@ -4232,12 +4232,87 @@ function showSuccess(msg, id) {
         posts.forEach((p, i) => wrap.appendChild(buildCard(p, i)));
         return wrap;
     }
-    function render(topPosts, recentPosts, account) {
-        results.innerHTML = '';
-        results.appendChild(renderList('🏆 Top ' + topPosts.length + ' viral' + (account ? ' — ' + account : ''), topPosts));
-        if (Array.isArray(recentPosts) && recentPosts.length) {
-            results.appendChild(renderList('🆕 Most recent', recentPosts));
+    // ── Saved scrapes: persist across reloads, each with its own delete ──
+    // Kept in localStorage so results stay on the page after a reload and
+    // accumulate (scrape several accounts, keep the ones you want). Thumbnails
+    // are signed CDN urls that expire, so an old card may lose its image — the
+    // links, captions, counts and dates still work (img onerror hides broken).
+    const LS_KEY = 'flipit_profile_scrapes';
+    const MAX_SAVED = 15;
+    function loadSaved() {
+        try { const a = JSON.parse(localStorage.getItem(LS_KEY) || '[]'); return Array.isArray(a) ? a : []; }
+        catch (e) { return []; }
+    }
+    function persist(arr) {
+        try { localStorage.setItem(LS_KEY, JSON.stringify(arr.slice(0, MAX_SAVED))); } catch (e) { /* quota — stays in memory */ }
+    }
+    let saved = loadSaved();
+
+    function savedStamp(ms) {
+        if (!ms) return '';
+        try {
+            const d = new Date(ms);
+            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' +
+                   d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+        } catch (e) { return ''; }
+    }
+    function renderScrapeBlock(entry) {
+        const block = document.createElement('div');
+        block.style.cssText = 'border:1px solid #e0dcd5;border-radius:14px;padding:14px;margin-bottom:16px;background:#fff;';
+        const head = document.createElement('div');
+        head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap;';
+        const title = document.createElement('div');
+        title.style.cssText = 'font-weight:800;color:#1a1a2e;font-size:15px;';
+        title.textContent = (entry.account || 'Profile') + ' — top viral + recent';
+        const meta = document.createElement('div');
+        meta.style.cssText = 'display:flex;align-items:center;gap:10px;';
+        const when = document.createElement('span');
+        when.style.cssText = 'font-size:11px;color:#999;';
+        when.textContent = entry.savedAt ? 'saved ' + savedStamp(entry.savedAt) : '';
+        const del = document.createElement('button');
+        del.type = 'button';
+        del.textContent = '✕ Delete';
+        del.style.cssText = 'padding:6px 11px;background:#fff;color:#c2185b;border:1.5px solid #f0c0d0;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;';
+        del.addEventListener('click', () => deleteScrape(entry.id));
+        meta.appendChild(when); meta.appendChild(del);
+        head.appendChild(title); head.appendChild(meta);
+        block.appendChild(head);
+        block.appendChild(renderList('🏆 Top ' + (entry.posts || []).length + ' viral', entry.posts || []));
+        if (Array.isArray(entry.recent) && entry.recent.length) {
+            block.appendChild(renderList('🆕 Most recent', entry.recent));
         }
+        return block;
+    }
+    function renderAll() {
+        results.innerHTML = '';
+        if (!saved.length) return;
+        if (saved.length > 1) {
+            const bar = document.createElement('div');
+            bar.style.cssText = 'display:flex;justify-content:flex-end;margin-bottom:8px;';
+            const clear = document.createElement('button');
+            clear.type = 'button';
+            clear.textContent = '🗑 Clear all (' + saved.length + ')';
+            clear.style.cssText = 'padding:6px 12px;background:#fff;color:#c2185b;border:1.5px solid #f0c0d0;border-radius:8px;font-weight:700;font-size:12px;cursor:pointer;';
+            clear.addEventListener('click', () => { saved = []; persist(saved); renderAll(); });
+            bar.appendChild(clear);
+            results.appendChild(bar);
+        }
+        saved.forEach(entry => results.appendChild(renderScrapeBlock(entry)));
+    }
+    function deleteScrape(id) {
+        saved = saved.filter(e => e.id !== id);
+        persist(saved);
+        renderAll();
+    }
+    function saveScrape(account, posts, recent) {
+        const entry = {
+            id: 'ps_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            account, savedAt: Date.now(), posts, recent
+        };
+        saved.unshift(entry);
+        if (saved.length > MAX_SAVED) saved = saved.slice(0, MAX_SAVED);
+        persist(saved);
+        renderAll();
     }
     async function run() {
         const link = (input.value || '').trim();
@@ -4246,7 +4321,7 @@ function showSuccess(msg, id) {
         btn.disabled = true;
         const orig = btn.textContent;
         btn.textContent = '⏳ Finding…';
-        results.innerHTML = '';
+        // Note: do NOT clear results here — previously-saved scrapes stay on the page.
         setStatus('⏳ Pulling their posts — top viral + most recent (~30s)…', null);
         try {
             const started = await call({ url: link });
@@ -4263,8 +4338,9 @@ function showSuccess(msg, id) {
             }
             if (!done) throw new Error('Taking too long — try again, or check the handle.');
             if (!done.length) throw new Error('No public posts found for that profile.');
-            render(done, recent, account);
-            setStatus('✅ Top viral + most recent.', true);
+            saveScrape(account, done, recent);   // persists + renders; stays on the page
+            setStatus('✅ Saved to the page — hit ✕ Delete on any set when you\'re done.', true);
+            if (input) input.value = '';
         } catch (e) {
             setStatus('❌ ' + (e.message || 'Lookup failed.'), false);
         } finally {
@@ -4274,6 +4350,7 @@ function showSuccess(msg, id) {
     }
     btn.addEventListener('click', run);
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+    renderAll(); // restore previously-saved scrapes on page load
 })();
 
 // ── HEAVY VIDEO JOB TRANSPORT ─────────────────────────────────────
