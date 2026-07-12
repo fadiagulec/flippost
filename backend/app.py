@@ -663,28 +663,18 @@ def transcribe_video():
         })
 
 
-@app.route('/transcribe-url', methods=['POST', 'OPTIONS'])
-def transcribe_url():
-    """Transcribe a video FROM A URL — no upload. yt-dlp downloads just the
-    audio (server-side), then Whisper transcribes it. This avoids the browser
-    upload entirely, so it works for full-length videos of any size and on
-    networks that can't push big uploads. Same reliability as /download
-    (TikTok/YouTube via yt-dlp; Instagram needs INSTAGRAM_COOKIES_B64).
-
-    Request:  { url }
-    Returns:  { success, transcript, segments, duration, language }
+def _do_transcribe_url(url):
+    """Core transcribe: yt-dlp pulls the audio, Whisper transcribes it. Returns
+    a plain dict; on error the dict carries '_status' (the HTTP code the sync
+    endpoint should use). Shared by /transcribe-url (sync) and the async worker
+    so both behave identically. Timeouts are generous because the async worker
+    runs off the request thread — a long video no longer blocks a live request.
     """
-    if request.method == 'OPTIONS':
-        return '', 200
-
     openai_key = os.environ.get('OPENAI_API_KEY')
     if not openai_key:
-        return jsonify({'error': 'Transcription not configured (missing OPENAI_API_KEY).'}), 503
-
-    data = request.get_json(silent=True) or {}
-    url = (data.get('url') or '').strip()
+        return {'error': 'Transcription not configured (missing OPENAI_API_KEY).', '_status': 503}
     if not url or not url.startswith(('http://', 'https://')):
-        return jsonify({'error': 'Paste a valid video URL.'}), 400
+        return {'error': 'Paste a valid video URL.', '_status': 400}
 
     with tempfile.TemporaryDirectory() as tmpdir:
         out_tmpl = os.path.join(tmpdir, 'audio.%(ext)s')
@@ -698,7 +688,7 @@ def transcribe_url():
                 '--output', out_tmpl,
                 '--add-header', 'User-Agent:Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
             ] + extra_args + [url]
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=90)
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=180)
 
         result = run_ytdlp()
 
@@ -717,24 +707,24 @@ def transcribe_url():
         if result.returncode != 0:
             err = (result.stderr or '')[-300:] or 'Download failed'
             if 'login' in err.lower() or 'authentication' in err.lower():
-                return jsonify({'error': 'That link needs login (e.g. private Instagram). Try a public TikTok/YouTube link.'}), 400
-            return jsonify({'error': 'Could not fetch that video. It may be private, region-locked, or unsupported.'}), 400
+                return {'error': 'That link needs login (e.g. private Instagram). Try a public TikTok/YouTube link.', '_status': 400}
+            return {'error': 'Could not fetch that video. It may be private, region-locked, or unsupported.', '_status': 400}
 
         audio_files = glob.glob(os.path.join(tmpdir, 'audio.*'))
         audio_files = [f for f in audio_files if f.endswith('.mp3')] or audio_files
         if not audio_files:
-            return jsonify({'error': 'No audio could be extracted from that link.'}), 400
+            return {'error': 'No audio could be extracted from that link.', '_status': 400}
         audio_path = audio_files[0]
 
         if os.path.getsize(audio_path) < 128:
-            return jsonify({'error': 'No audio track found in that video.'}), 400
+            return {'error': 'No audio track found in that video.', '_status': 400}
         if os.path.getsize(audio_path) > 24 * 1024 * 1024:
-            return jsonify({'error': 'Audio too long for one pass — try a shorter video.'}), 413
+            return {'error': 'Audio too long for one pass — try a shorter video (under ~25 min).', '_status': 413}
 
         try:
             import requests as _req
         except ImportError:
-            return jsonify({'error': 'requests not installed'}), 500
+            return {'error': 'requests not installed', '_status': 500}
 
         try:
             with open(audio_path, 'rb') as af:
@@ -743,14 +733,14 @@ def transcribe_url():
                     headers={'Authorization': f'Bearer {openai_key}'},
                     files={'file': ('audio.mp3', af, 'audio/mpeg')},
                     data={'model': 'whisper-1', 'response_format': 'verbose_json'},
-                    timeout=120
+                    timeout=300
                 )
         except Exception as e:
-            return jsonify({'error': f'Whisper call failed: {e}'}), 502
+            return {'error': f'Whisper call failed: {e}', '_status': 502}
 
         if resp.status_code != 200:
-            print(f'[transcribe-url] whisper rc={resp.status_code} body={resp.text[:300]}', flush=True)
-            return jsonify({'error': 'Whisper API returned an error.', 'detail': resp.text[:300]}), 502
+            print(f'[transcribe] whisper rc={resp.status_code} body={resp.text[:300]}', flush=True)
+            return {'error': 'Whisper API returned an error.', 'detail': resp.text[:300], '_status': 502}
 
         result_j = resp.json()
         segments = [{
@@ -758,13 +748,94 @@ def transcribe_url():
             'end':   float(s.get('end', 0)),
             'text':  str(s.get('text', '')).strip()
         } for s in (result_j.get('segments') or [])]
-        return jsonify({
+        return {
             'success': True,
             'transcript': (result_j.get('text') or '').strip(),
             'segments': segments,
             'duration': float(result_j.get('duration') or 0),
             'language': result_j.get('language') or ''
-        })
+        }
+
+
+@app.route('/transcribe-url', methods=['POST', 'OPTIONS'])
+def transcribe_url():
+    """Synchronous transcribe (kept for direct/agent callers). Long videos hold
+    the request open for the whole job — use the async endpoints below from the
+    browser instead (they poll, so no single request stays open for minutes)."""
+    if request.method == 'OPTIONS':
+        return '', 200
+    data = request.get_json(silent=True) or {}
+    r = _do_transcribe_url((data.get('url') or '').strip())
+    status = r.pop('_status', 200)
+    return jsonify(r), status
+
+
+# ── Async transcribe: start a background job, poll for the result ──────
+# Flask runs single-process here (`python app.py`), so this in-memory dict is
+# shared across all requests. Browsers that can't hold a long direct connection
+# to Railway — or that go through the Netlify proxy's ~24s cap — start a job and
+# then poll every few seconds. Each request is short, so long videos work.
+_TRANSCRIBE_JOBS = {}
+_TRANSCRIBE_LOCK = threading.Lock()
+_TRANSCRIBE_TTL = 20 * 60  # forget a job 20 min after it finishes
+
+
+def _transcribe_jobs_gc():
+    now = time.time()
+    with _TRANSCRIBE_LOCK:
+        for k in [k for k, v in _TRANSCRIBE_JOBS.items() if now - v.get('ts', now) > _TRANSCRIBE_TTL]:
+            _TRANSCRIBE_JOBS.pop(k, None)
+
+
+@app.route('/transcribe-async/start', methods=['POST', 'OPTIONS'])
+def transcribe_async_start():
+    if request.method == 'OPTIONS':
+        return '', 200
+    if not os.environ.get('OPENAI_API_KEY'):
+        return jsonify({'error': 'Transcription not configured (missing OPENAI_API_KEY).'}), 503
+    data = request.get_json(silent=True) or {}
+    url = (data.get('url') or '').strip()
+    if not url or not url.startswith(('http://', 'https://')):
+        return jsonify({'error': 'Paste a valid video URL.'}), 400
+
+    _transcribe_jobs_gc()
+    job_id = base64.urlsafe_b64encode(os.urandom(12)).decode('ascii').rstrip('=')
+    with _TRANSCRIBE_LOCK:
+        _TRANSCRIBE_JOBS[job_id] = {'status': 'running', 'ts': time.time()}
+
+    def _worker(u, jid):
+        try:
+            res = _do_transcribe_url(u)
+        except Exception as e:
+            res = {'error': f'Transcribe crashed: {e}'}
+        res.pop('_status', None)
+        with _TRANSCRIBE_LOCK:
+            job = _TRANSCRIBE_JOBS.get(jid)
+            if job is not None:
+                job.update({'status': 'done', 'result': res, 'ts': time.time()})
+
+    threading.Thread(target=_worker, args=(url, job_id), daemon=True).start()
+    return jsonify({'jobId': job_id, 'status': 'running'})
+
+
+@app.route('/transcribe-async/result', methods=['POST', 'GET', 'OPTIONS'])
+def transcribe_async_result():
+    if request.method == 'OPTIONS':
+        return '', 200
+    if request.method == 'GET':
+        job_id = (request.args.get('jobId') or '').strip()
+    else:
+        job_id = ((request.get_json(silent=True) or {}).get('jobId') or '').strip()
+    if not job_id:
+        return jsonify({'error': 'Missing jobId.'}), 400
+    with _TRANSCRIBE_LOCK:
+        job = _TRANSCRIBE_JOBS.get(job_id)
+        if job is None:
+            return jsonify({'status': 'unknown', 'error': 'That transcription expired or was never started — start again.'}), 404
+        if job.get('status') != 'done':
+            return jsonify({'status': 'running'})
+        result = job.get('result') or {}
+    return jsonify({'status': 'done', 'result': result})
 
 
 @app.route('/extract-scenes', methods=['POST', 'OPTIONS'])
@@ -1302,4 +1373,6 @@ def instagram_search():
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    # threaded=True so background transcribe jobs + result polls (and other
+    # users) are served concurrently rather than one-at-a-time.
+    app.run(host='0.0.0.0', port=port, threaded=True)

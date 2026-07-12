@@ -3835,12 +3835,9 @@ function showSuccess(msg, id) {
             try {
                 if (/instagram\.com|instagr\.am/i.test(link)) setStatus('⏳ Finding the Instagram video…', null);
                 const fetchUrl = await resolveMediaLink(link);   // IG → direct CDN url; else unchanged
-                const data = await postHeavyJob(
-                    '/transcribe-url',
-                    '/.netlify/functions/transcribe-url',
-                    { url: fetchUrl },
-                    240000   // long videos (Loom screen-shares etc.) can take a couple minutes
-                );
+                const data = await transcribeViaPoll(fetchUrl, (n) => {
+                    if (n === 3) setStatus('⏳ Still transcribing — long videos can take 1–2 min…', null);
+                });
                 if (!data.success || !data.transcript) {
                     throw new Error(data.error || 'No transcript returned.');
                 }
@@ -4095,7 +4092,7 @@ function showSuccess(msg, id) {
             .catch(e => fail(scBody, e.message || 'Scene grab failed.'));
 
         // Transcript — then score the spoken script it produces.
-        const transP = postHeavyJob('/transcribe-url', '/.netlify/functions/transcribe-url', { url }, 240000)
+        const transP = transcribeViaPoll(url)
             .then(async d => {
                 if (!d.success || !d.transcript) throw new Error(d.error || 'No transcript returned.');
                 renderTranscript(tBody, d);
@@ -4498,6 +4495,46 @@ async function resolveMediaLink(link) {
         // else status:'running' — keep waiting
     }
     throw new Error('Instagram is taking too long to respond — try again, or use a TikTok/YouTube link.');
+}
+
+// Transcription runs as a background job (start → poll) so long videos work:
+// the old single-request approach died on the Netlify proxy's ~24s cap and on
+// networks that drop a long-held direct connection to Railway. Every call here
+// is short and goes through the Netlify proxy (reliably reachable) → Railway.
+async function transcribeViaPoll(fetchUrl, onTick) {
+    const call = async (payload) => {
+        let resp;
+        try {
+            resp = await fetch('/.netlify/functions/transcribe-async', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                signal: AbortSignal.timeout(20000)
+            });
+        } catch (e) {
+            throw new Error('Could not reach the transcriber — check your connection and retry.');
+        }
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok && !data.status) throw new Error(data.error || ('Transcribe error (' + resp.status + ').'));
+        return data;
+    };
+    const started = await call({ url: fetchUrl });
+    if (started.result && started.result.success) return started.result;   // fast path
+    if (!started.jobId) throw new Error(started.error || 'Could not start transcription.');
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    for (let i = 0; i < 90; i++) {   // poll ~4.5 min max
+        await sleep(3000);
+        const p = await call({ jobId: started.jobId });
+        if (p.status === 'done') {
+            const r = p.result || {};
+            if (!r.success) throw new Error(r.error || 'No transcript returned.');
+            return r;
+        }
+        if (p.status === 'unknown') throw new Error(p.error || 'That transcription expired — please try again.');
+        if (typeof onTick === 'function') onTick(i + 1);
+        // else status:'running' — keep polling
+    }
+    throw new Error('Transcription is taking too long — try a shorter clip (under ~25 min).');
 }
 
 async function postHeavyJob(railwayPath, netlifyProxyPath, payloadObj, timeoutMs) {
