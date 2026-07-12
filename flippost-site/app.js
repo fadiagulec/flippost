@@ -3831,14 +3831,15 @@ function showSuccess(msg, id) {
             urlBtn.disabled = true;
             const orig = urlBtn.textContent;
             urlBtn.textContent = '⏳ Downloading + transcribing…';
-            setStatus('⏳ Fetching audio + transcribing (10–40s)…', null);
+            setStatus('⏳ Fetching audio + transcribing — a few seconds for short clips, up to ~2 min for long videos…', null);
             try {
                 if (/instagram\.com|instagr\.am/i.test(link)) setStatus('⏳ Finding the Instagram video…', null);
                 const fetchUrl = await resolveMediaLink(link);   // IG → direct CDN url; else unchanged
                 const data = await postHeavyJob(
                     '/transcribe-url',
                     '/.netlify/functions/transcribe-url',
-                    { url: fetchUrl }
+                    { url: fetchUrl },
+                    240000   // long videos (Loom screen-shares etc.) can take a couple minutes
                 );
                 if (!data.success || !data.transcript) {
                     throw new Error(data.error || 'No transcript returned.');
@@ -4094,7 +4095,7 @@ function showSuccess(msg, id) {
             .catch(e => fail(scBody, e.message || 'Scene grab failed.'));
 
         // Transcript — then score the spoken script it produces.
-        const transP = postHeavyJob('/transcribe-url', '/.netlify/functions/transcribe-url', { url })
+        const transP = postHeavyJob('/transcribe-url', '/.netlify/functions/transcribe-url', { url }, 240000)
             .then(async d => {
                 if (!d.success || !d.transcript) throw new Error(d.error || 'No transcript returned.');
                 renderTranscript(tBody, d);
@@ -4499,27 +4500,32 @@ async function resolveMediaLink(link) {
     throw new Error('Instagram is taking too long to respond — try again, or use a TikTok/YouTube link.');
 }
 
-async function postHeavyJob(railwayPath, netlifyProxyPath, payloadObj) {
+async function postHeavyJob(railwayPath, netlifyProxyPath, payloadObj, timeoutMs) {
     const body = JSON.stringify(payloadObj);
-    // 1) Direct to Railway — no 6MB cap, ~90s ceiling for slow ffmpeg jobs.
+    const ceiling = timeoutMs || 120000;   // callers pass more for long jobs (e.g. transcribe)
+    // 1) Direct to Railway — no 6MB cap. Ceiling covers slow ffmpeg/Whisper jobs.
     try {
         const resp = await fetch(FLIPIT_RAILWAY_BASE + railwayPath, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body,
-            signal: AbortSignal.timeout(90000)
+            signal: AbortSignal.timeout(ceiling)
         });
         return await readHeavyJobResponse(resp);
     } catch (directErr) {
-        // Fall back to the Netlify proxy ONLY on a genuine network failure
-        // (fetch throws TypeError, or the timeout aborts). HTTP/parse errors
-        // thrown by readHeavyJobResponse are real server responses — surface
-        // them instead of masking with a fallback that fails the same way.
-        const isNetwork = directErr && (
-            directErr.name === 'TypeError' ||
-            directErr.name === 'AbortError' ||
-            /failed to fetch|load failed|networkerror/i.test(directErr.message || '')
-        );
+        const nm = (directErr && directErr.name) || '';
+        const ms = (directErr && directErr.message) || '';
+        // A TIMEOUT means the job is just slow/large (e.g. a long video). The
+        // Netlify proxy caps at 6MB + ~26s, so it would only fail worse and
+        // return the confusing "proxy failed: aborted due to timeout". Don't
+        // mask the real cause — surface a clear message instead.
+        const isTimeout = nm === 'TimeoutError' || nm === 'AbortError' || /abort|timed?\s?out/i.test(ms);
+        // A genuine NETWORK failure (blocked *.up.railway.app) is the only case
+        // worth the proxy fallback — the original "Failed to fetch" case.
+        const isNetwork = nm === 'TypeError' || /failed to fetch|load failed|networkerror/i.test(ms);
+        if (isTimeout && !isNetwork) {
+            throw new Error('That video is taking too long — it may be very long. Try a shorter clip (roughly under ~20 min), or try again.');
+        }
         if (!isNetwork) throw directErr;
         const resp = await fetch(netlifyProxyPath, {
             method: 'POST',
