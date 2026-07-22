@@ -2872,6 +2872,35 @@ function showSuccess(msg, id) {
             section.appendChild(sum);
         }
 
+        // Prominent hook — the single strongest opener, right under the score
+        // (the full set of alternatives still shows in "Make it a 9–10" below).
+        if (Array.isArray(data.hooks) && data.hooks.length) {
+            const hookWrap = document.createElement('div');
+            hookWrap.style.cssText = 'background:#fff7ed;border:1.5px solid #fed7aa;border-radius:12px;padding:14px;margin:0 0 16px;';
+            const hl = document.createElement('div');
+            hl.style.cssText = 'font-weight:800;color:#c2410c;font-size:13px;letter-spacing:0.03em;text-transform:uppercase;margin-bottom:7px;';
+            hl.textContent = '🪝 Hook to open with';
+            hookWrap.appendChild(hl);
+            const ht = document.createElement('div');
+            ht.style.cssText = 'font-size:16px;line-height:1.5;color:#1a1a2e;font-weight:600;';
+            ht.textContent = data.hooks[0];
+            hookWrap.appendChild(ht);
+            const hc = document.createElement('button');
+            hc.textContent = '📋 Copy hook';
+            hc.style.cssText = 'margin-top:9px;padding:8px 13px;background:#c2410c;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
+            hc.addEventListener('click', () => {
+                navigator.clipboard.writeText(data.hooks[0]).then(() => { hc.textContent = '✅ Copied'; setTimeout(() => { hc.textContent = '📋 Copy hook'; }, 1500); }).catch(() => {});
+            });
+            hookWrap.appendChild(hc);
+            if (data.hooks.length > 1) {
+                const more = document.createElement('div');
+                more.style.cssText = 'font-size:12px;color:#9a3412;margin-top:8px;';
+                more.textContent = '+ ' + (data.hooks.length - 1) + ' more hooks in "Make it a 9–10" below.';
+                hookWrap.appendChild(more);
+            }
+            section.appendChild(hookWrap);
+        }
+
         const dimHeader = document.createElement('h4');
         dimHeader.style.cssText = 'font-size:15px;color:#1a1a2e;margin:14px 0 10px;';
         dimHeader.textContent = '📊 Dimension Breakdown';
@@ -3967,6 +3996,23 @@ function showSuccess(msg, id) {
             sum.style.cssText = 'color:#444;font-size:13px;line-height:1.5;text-align:center;margin:0 0 12px;';
             sum.textContent = data.summary;
             body.appendChild(sum);
+        }
+        // Prominent hook right under the score.
+        if (Array.isArray(data.hooks) && data.hooks.length) {
+            const hw = document.createElement('div');
+            hw.style.cssText = 'background:#fff7ed;border:1.5px solid #fed7aa;border-radius:10px;padding:11px;margin:0 0 12px;';
+            const hl = document.createElement('div');
+            hl.style.cssText = 'font-weight:800;color:#c2410c;font-size:12px;letter-spacing:0.03em;text-transform:uppercase;margin-bottom:5px;';
+            hl.textContent = '🪝 Hook to open with';
+            const ht = document.createElement('div');
+            ht.style.cssText = 'font-size:14px;line-height:1.45;color:#1a1a2e;font-weight:600;';
+            ht.textContent = data.hooks[0];
+            const hc = document.createElement('button');
+            hc.textContent = '📋 Copy hook';
+            hc.style.cssText = 'margin-top:7px;padding:6px 11px;background:#c2410c;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer;';
+            hc.addEventListener('click', () => { navigator.clipboard.writeText(data.hooks[0]).then(() => { hc.textContent = '✅ Copied'; setTimeout(() => { hc.textContent = '📋 Copy hook'; }, 1500); }).catch(() => {}); });
+            hw.appendChild(hl); hw.appendChild(ht); hw.appendChild(hc);
+            body.appendChild(hw);
         }
         (data.dimensions || []).forEach(d => {
             const c = d.score >= 80 ? '#0d6e66' : (d.score >= 60 ? '#d97706' : '#c2185b');
