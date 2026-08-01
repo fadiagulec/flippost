@@ -39,10 +39,34 @@ function recordFlipSuccess() {
     renderTrialBanner();
 }
 
-// Single-tier pricing: $57 lifetime (anchored against $99), one-time, no subs.
-// Stripe link VERIFIED 2026-07-05 to charge $57.00 for the "FlipIt Pro"
-// product (live checkout page confirmed). Price matches the UI everywhere.
-const STRIPE_LIFETIME_LINK = 'https://buy.stripe.com/28EcMY83I1XYd2i5r83Je0q';
+// ── Business config ──────────────────────────────────────────────────────
+// Every business-specific value (brand, price, checkout link, support email)
+// comes from config.js. Nothing about YOUR Stripe account or YOUR domain is
+// hardcoded in this file. The fallbacks below only matter if config.js fails
+// to load, and they are deliberately neutral rather than anyone's real link.
+const FLIPIT_CFG = window.FLIPIT_CONFIG || {};
+const BRAND_NAME = FLIPIT_CFG.brandName || 'FlipIt';
+const PRICE = FLIPIT_CFG.price || '';
+const PRICE_ANCHOR = FLIPIT_CFG.priceAnchor || '';
+const SUPPORT_EMAIL = FLIPIT_CFG.supportEmail || '';
+// '/get' is a server route that redirects to the STRIPE_PAYMENT_LINK env var.
+const STRIPE_LIFETIME_LINK = FLIPIT_CFG.checkoutUrl || '/get';
+
+function supportMailto(subject) {
+    if (typeof FLIPIT_CFG.mailto === 'function') return FLIPIT_CFG.mailto(subject);
+    return 'mailto:' + SUPPORT_EMAIL + (subject ? '?subject=' + encodeURIComponent(subject) : '');
+}
+
+// "$99 $57 Lifetime" when an anchor price is set, "$57 Lifetime" when not.
+function priceHtml() {
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]
+    ));
+    const anchor = PRICE_ANCHOR
+        ? '<s style="opacity:0.65;font-weight:600;">' + esc(PRICE_ANCHOR) + '</s> '
+        : '';
+    return anchor + esc(PRICE);
+}
 
 // `reason`: 'flip_cap' (default \u2014 used 3/day) | 'pro_feature' (clicked
 // Image Prompts / Video Prompts / Vision while on free tier) | 'pro_cap'
@@ -86,7 +110,7 @@ function showPaywallModal(state, reason) {
     if (isProCap) {
         // Pro user hit a cap \u2014 they already paid, don't show pricing again
         const mail = document.createElement('a');
-        mail.href = 'mailto:contact@earnwith-ai.com?subject=FlipIt%20Custom%20Plan';
+        mail.href = supportMailto(BRAND_NAME + ' custom plan');
         mail.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;text-decoration:none;padding:14px 32px;border-radius:10px;font-weight:700;font-size:16px;margin-bottom:8px;';
         mail.textContent = '\u{1F4E7} Contact about a custom plan';
         card.appendChild(mail);
@@ -120,7 +144,7 @@ function showPaywallModal(state, reason) {
         a.target = '_blank';
         a.rel = 'noopener';
         a.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#0d6e66,#0a9b8e);color:#fff;text-decoration:none;padding:16px 36px;border-radius:10px;font-weight:700;font-size:17px;margin-bottom:12px;';
-        a.innerHTML = '\u26A1 Unlock FlipIt \u2014 <s style="opacity:0.65;font-weight:600;">$99</s> $57 Lifetime';
+        a.innerHTML = '\u26A1 Unlock ' + BRAND_NAME + ' \u2014 ' + priceHtml() + ' Lifetime';
         card.appendChild(a);
         const trust = document.createElement('p');
         trust.style.cssText = 'color:#888;font-size:13px;margin:8px 0 0;line-height:1.5;';
@@ -128,7 +152,16 @@ function showPaywallModal(state, reason) {
         card.appendChild(trust);
         const restore = document.createElement('p');
         restore.style.cssText = 'color:#aaa;font-size:12px;margin:10px 0 0;';
-        restore.innerHTML = 'Already bought? Open the receipt link from your purchase email to restore access, or <a href="mailto:contact@earnwith-ai.com?subject=Restore%20my%20FlipIt%20Pro" style="color:#0d6e66;">email us</a>.';
+        restore.textContent = 'Already bought? Open the receipt link from your purchase email to restore access';
+        if (SUPPORT_EMAIL) {
+            restore.appendChild(document.createTextNode(', or '));
+            const restoreMail = document.createElement('a');
+            restoreMail.href = supportMailto('Restore my ' + BRAND_NAME + ' Pro');
+            restoreMail.style.color = '#0d6e66';
+            restoreMail.textContent = 'email us';
+            restore.appendChild(restoreMail);
+        }
+        restore.appendChild(document.createTextNode('.'));
         card.appendChild(restore);
     }
 
@@ -182,11 +215,11 @@ function renderTrialBanner() {
     void numSpan;
 
     const ctaLink = document.createElement('a');
-    ctaLink.href = 'https://buy.stripe.com/28EcMY83I1XYd2i5r83Je0q';
+    ctaLink.href = STRIPE_LIFETIME_LINK;
     ctaLink.target = '_blank';
     ctaLink.rel = 'noopener';
     ctaLink.style.cssText = 'color:#0d6e66;font-weight:700;text-decoration:none;border-bottom:1px solid #0d6e66;';
-    ctaLink.textContent = 'Lock in $57 lifetime \u2192';
+    ctaLink.textContent = PRICE ? ('Lock in ' + PRICE + ' lifetime \u2192') : 'Get lifetime access \u2192';
     banner.appendChild(ctaLink);
 
     document.body.insertBefore(banner, document.body.firstChild);
@@ -278,8 +311,16 @@ function showPlatformBadge(url) {
     } else {
         // Special-case the owner-only /unlock/ link so the owner doesn't get
         // stuck trying to "Flip" their own Pro unlock URL.
-        const isUnlockUrl = /^https?:\/\/[^/]*flipit\.earnwith-ai\.com\/unlock\//i.test(url)
-            || url.startsWith('/unlock/');
+        // Matches an /unlock/ link on THIS site, whatever domain it is served
+        // from — no hardcoded hostname, so it keeps working after a rebrand.
+        let isUnlockUrl = url.startsWith('/unlock/');
+        if (!isUnlockUrl) {
+            try {
+                const u = new URL(url, window.location.origin);
+                isUnlockUrl = u.origin === window.location.origin
+                    && /^\/unlock\//i.test(u.pathname);
+            } catch { /* not a parseable URL — treat as a normal post link */ }
+        }
         if (isUnlockUrl) {
             badge.innerHTML = '⚠️ That\'s your Pro <strong>unlock link</strong> — paste it into your <strong>browser\'s address bar</strong> (top of the window), not here. This box is for Instagram/TikTok/YouTube post URLs.';
             badge.style.cssText = 'display:block;background:#fff4e0;color:#8a5a00;padding:10px 14px;border-radius:8px;font-size:14px;margin-top:8px;line-height:1.5;border-left:3px solid #e0a020;';
@@ -2578,7 +2619,7 @@ function showSuccess(msg, id) {
 // Honors ?url= or ?u= in the page URL so the Chrome extension /
 // bookmarklet / share buttons / any external referrer can deep-link
 // directly into a flip. Example:
-//   https://flipit.earnwith-ai.com/?url=https%3A%2F%2Finstagram.com%2Fp%2FXYZ
+//   https://your-site.com/?url=https%3A%2F%2Finstagram.com%2Fp%2FXYZ
 // Validates the inbound URL (must be http(s) and on a known social
 // platform) before auto-clicking Extract — prevents abuse where a
 // random page redirects users into running flips on attacker URLs.
@@ -4482,7 +4523,10 @@ function showSuccess(msg, id) {
 // when the direct call fails at the NETWORK level — the original
 // "Failed to fetch" case where a corporate/mobile network blocks
 // *.up.railway.app. Big files work; blocked networks still degrade.
-const FLIPIT_RAILWAY_BASE = 'https://web-production-8afc3.up.railway.app';
+// Empty by default: without a configured backend origin every heavy job
+// routes through the Netlify proxy, which always works. Set railwayBase in
+// config.js to your own backend URL to take the faster direct path.
+const FLIPIT_RAILWAY_BASE = (window.FLIPIT_CONFIG && window.FLIPIT_CONFIG.railwayBase) || '';
 
 async function readHeavyJobResponse(resp) {
     const text = await resp.text();
@@ -4586,6 +4630,17 @@ async function transcribeViaPoll(fetchUrl, onTick) {
 async function postHeavyJob(railwayPath, netlifyProxyPath, payloadObj, timeoutMs) {
     const body = JSON.stringify(payloadObj);
     const ceiling = timeoutMs || 120000;   // callers pass more for long jobs (e.g. transcribe)
+    // No direct backend origin configured (config.js railwayBase is '') —
+    // skip straight to the Netlify proxy, which is the always-works path.
+    if (!FLIPIT_RAILWAY_BASE) {
+        const resp = await fetch(netlifyProxyPath, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body,
+            signal: AbortSignal.timeout(Math.min(ceiling, 26000))
+        });
+        return await readHeavyJobResponse(resp);
+    }
     // 1) Direct to Railway — no 6MB cap. Ceiling covers slow ffmpeg/Whisper jobs.
     try {
         const resp = await fetch(FLIPIT_RAILWAY_BASE + railwayPath, {

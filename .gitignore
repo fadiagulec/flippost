@@ -1,6 +1,12 @@
 # Local Netlify folder
 .netlify
 
+# Real secrets. `.env.example` IS tracked — it documents what to set and why,
+# with no real values. Anything that could hold a live key stays out.
+.env
+.env.*
+!.env.example
+
 # Node modules
 node_modules/
 

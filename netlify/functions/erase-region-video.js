@@ -6,20 +6,17 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 // Same reason as transcode-eraser-video: browser-to-Railway requests get
 // blocked on some networks/extensions, so we keep the browser talking
 // to the same origin it loaded the page from.
+const { corsHeaders, buildRailwayUrl, requireRailway } = require('./_config');
 
-const RAILWAY_ERASE_URL = 'https://web-production-8afc3.up.railway.app/erase-region';
+const RAILWAY_ERASE_URL = buildRailwayUrl("/erase-region");
 
 exports.handler = __wrapErr(async function (event) {
-    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-    const origin = event.headers?.origin || '';
-    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+    const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
 
-    const headers = {
-        'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Content-Type': 'application/json'
-    };
+    // Self-hosted video backend is required for this endpoint. Returns a
+    // clear 503 (instead of a confusing fetch error) when RAILWAY_URL is unset.
+    const __noBackend = requireRailway(headers);
+    if (__noBackend) return __noBackend;
 
     if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
     if (event.httpMethod !== 'POST') {

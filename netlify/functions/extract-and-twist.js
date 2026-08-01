@@ -1,5 +1,6 @@
 require('./_error_reporter');
 const { wrap: __wrapErr } = require('./_error_reporter');
+const { corsHeaders, buildRailwayUrl, requireRailway } = require('./_config');
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
@@ -7,7 +8,7 @@ const { assertPublicUrl } = require('./_ssrf_guard');
 
 // Railway/Instaloader hybrid: try the free Python scraper before Apify.
 // On 503/blocked or fetch error, fall through to the existing Apify path.
-const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app';
+const RAILWAY_URL = buildRailwayUrl("");
 const RAILWAY_TIMEOUT_MS = 18000;
 
 // Smart image-URL dedup. The naive Array.from(new Set(urls)) treats two CDN
@@ -60,16 +61,7 @@ function dedupImageUrls(urls) {
 
 exports.handler = __wrapErr(async function(event) {
     const isPro = isProRequest(event);
-  const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-  const origin = event.headers?.origin || '';
-  const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-
-  const headers = {
-    'Access-Control-Allow-Origin': corsOrigin,
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Content-Type': 'application/json'
-  };
+  const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
 
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };
@@ -204,7 +196,7 @@ exports.handler = __wrapErr(async function(event) {
     // Image Prompt UX win on a Pro-gated feature.
     const needCaption = !originalText || originalText.length < 30;
     const needMoreImages = sourceImages.length < 2;
-    if (needCaption || needMoreImages) {
+    if (RAILWAY_URL && (needCaption || needMoreImages)) {
       try {
         const railwayUrl = RAILWAY_URL + '/instagram/post?url=' + encodeURIComponent(url);
         const r = await fetch(railwayUrl, { signal: AbortSignal.timeout(RAILWAY_TIMEOUT_MS) });

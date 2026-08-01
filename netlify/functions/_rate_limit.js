@@ -46,6 +46,7 @@
 //   request, log a warning) rather than break the app for a $57 product.
 
 const crypto = require('crypto');
+const { SUPPORT_EMAIL, PRICE_LABEL, BRAND_NAME } = require('./_config');
 
 // Lazy-load @netlify/blobs so a missing dep just disables rate limiting
 // instead of crashing every function at import time.
@@ -66,10 +67,16 @@ function loadBlobs() {
 
 const STORE_NAME = 'flipit-quota';
 
-const FREE_DAILY_LIMIT  = 3;
-const PRO_DAILY_LIMIT   = 50;
-const PRO_MONTHLY_LIMIT = 1000;
-const TOKEN_PER_MIN_LIMIT = 5;
+// Tunable without a code change — set these in Netlify env vars if the new
+// owner wants a different free tier or different Pro fair-use ceilings.
+function envInt(name, fallback) {
+    const n = parseInt(process.env[name], 10);
+    return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+const FREE_DAILY_LIMIT    = envInt('FREE_DAILY_LIMIT', 3);
+const PRO_DAILY_LIMIT     = envInt('PRO_DAILY_LIMIT', 50);
+const PRO_MONTHLY_LIMIT   = envInt('PRO_MONTHLY_LIMIT', 1000);
+const TOKEN_PER_MIN_LIMIT = envInt('TOKEN_PER_MIN_LIMIT', 5);
 
 // ── IP helpers ────────────────────────────────────────────────────────────
 
@@ -391,13 +398,13 @@ function rateLimitResponse(corsHeaders, info) {
 
     let message;
     if (info && info.proCapHit === 'monthly') {
-        message = "You've hit this month's fair-use cap — you're in the top 1% of users! Resets next month, or email contact@earnwith-ai.com for a custom plan.";
+        message = "You've hit this month's fair-use cap — you're in the top 1% of users! Resets next month." + (SUPPORT_EMAIL ? " Email " + SUPPORT_EMAIL + " for a custom plan." : "");
     } else if (info && info.proCapHit === 'daily') {
-        message = "You've hit today's fair-use cap. Resets at midnight UTC — or email contact@earnwith-ai.com if you need more.";
+        message = "You've hit today's fair-use cap. Resets at midnight UTC." + (SUPPORT_EMAIL ? " Email " + SUPPORT_EMAIL + " if you need more." : "");
     } else if (scope === 'minute') {
         message = "Too many requests. Please wait a moment and try again.";
     } else {
-        message = "Free tier limit reached (3 flips/day). Resets at midnight UTC, or unlock FlipIt Pro — $57 once, yours forever.";
+        message = "Free tier limit reached (" + FREE_DAILY_LIMIT + " flips/day). Resets at midnight UTC, or unlock " + BRAND_NAME + " Pro — " + PRICE_LABEL + " once, yours forever.";
     }
 
     return {

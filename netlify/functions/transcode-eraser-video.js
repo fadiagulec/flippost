@@ -8,20 +8,17 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 // extensions blocking *.up.railway.app, etc.). Routing through Netlify
 // keeps the browser talking to the same origin it loaded the page from,
 // so those edge networks can't block the request.
+const { corsHeaders, buildRailwayUrl, requireRailway } = require('./_config');
 
-const RAILWAY_PREPARE_URL = 'https://web-production-8afc3.up.railway.app/prepare-eraser';
+const RAILWAY_PREPARE_URL = buildRailwayUrl("/prepare-eraser");
 
 exports.handler = __wrapErr(async function (event) {
-    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-    const origin = event.headers?.origin || '';
-    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
+    const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
 
-    const headers = {
-        'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Content-Type': 'application/json'
-    };
+    // Self-hosted video backend is required for this endpoint. Returns a
+    // clear 503 (instead of a confusing fetch error) when RAILWAY_URL is unset.
+    const __noBackend = requireRailway(headers);
+    if (__noBackend) return __noBackend;
 
     if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
     if (event.httpMethod !== 'POST') {

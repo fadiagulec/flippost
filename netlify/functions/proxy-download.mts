@@ -14,19 +14,34 @@ import { promises as dns } from 'dns';
 const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 const FETCH_TIMEOUT_MS = 25000;
 
-const ALLOWED_ORIGINS = new Set<string>([
-    'https://flipit.earnwith-ai.com',
-    'https://flipit-app.netlify.app'
-]);
+// Origin allowlist, built from env at request time so a new owner never edits
+// this file. `URL` is set automatically by Netlify to the site's primary URL;
+// SITE_URL overrides it, ALLOWED_ORIGINS adds extras (comma-separated).
+// (This is a v2 ESM function, so it can't `require('./_config')` — same
+// env vars, small duplicated reader.)
+function allowedOrigins(): string[] {
+    const strip = (u: string) => (u || '').trim().replace(/\/+$/, '');
+    const out: string[] = [];
+    const push = (u: string) => {
+        const c = strip(u);
+        if (c && !out.includes(c)) out.push(c);
+    };
+    push(process.env.SITE_URL || process.env.URL || '');
+    push(process.env.DEPLOY_PRIME_URL || '');
+    (process.env.ALLOWED_ORIGINS || '').split(',').forEach(push);
+    return out;
+}
 
 // Origin-allowlist CORS — was '*'. proxy-download streams arbitrary upstream
 // bytes through our server, so allowing cross-origin abuse let any site bounce
 // traffic through our IP (and Netlify quota). SSRF guards already block
 // private targets; this closes the cross-origin-bandwidth abuse vector.
 function corsHeadersFor(req: Request): Record<string, string> {
-    const origin = req.headers.get('origin') || '';
-    const allowed = ALLOWED_ORIGINS.has(origin) ? origin : 'https://flipit.earnwith-ai.com';
+    const origin = (req.headers.get('origin') || '').replace(/\/+$/, '');
+    const list = allowedOrigins();
+    const allowed = list.includes(origin) ? origin : (list[0] || origin || 'null');
     return {
+        'Vary': 'Origin',
         'Access-Control-Allow-Origin': allowed,
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'GET, OPTIONS'

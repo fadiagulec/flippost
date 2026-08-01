@@ -9,6 +9,7 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 // profiles. Same pattern as resolve-ig.js.
 //   START: { url }              → { runId, datasetId }
 //   POLL:  { runId, datasetId } → { posts:[...top5], account } | { status:'running' } | { error }
+const { corsHeaders } = require('./_config');
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
@@ -20,15 +21,7 @@ const TOP_N = 6;         // top 6 by engagement + 6 most recent
 
 exports.handler = __wrapErr(async (event) => {
   const isPro = isProRequest(event);
-  const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-  const origin = event.headers?.origin || '';
-  const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-  const headers = {
-    'Access-Control-Allow-Origin': corsOrigin,
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Content-Type': 'application/json'
-  };
+  const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
 

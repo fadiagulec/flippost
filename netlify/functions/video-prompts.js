@@ -5,6 +5,7 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 // Generates 3 cinematic AI video prompts (main scene, b-roll, transition)
 // from a flipped script via the Claude API. Replaces the keyword-matching
 // client-side template so prompts actually depict the user's script.
+const { corsHeaders } = require('./_config');
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
@@ -16,16 +17,7 @@ exports.handler = __wrapErr( async function (event) {
     // '*'; the parallelization rewrite in PR #42 accidentally regressed
     // this back to '*'. Restoring the allowlist closes the cross-origin
     // quota-burn vector.
-    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-    const origin = event.headers?.origin || '';
-    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-
-    const headers = {
-        'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Content-Type': 'application/json'
-    };
+    const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
 
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 200, headers, body: '' };

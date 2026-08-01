@@ -18,6 +18,7 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 // Required env vars:
 //   FLIPIT_CREATOR_CODE   — random 32+ char secret only the owner knows
 //   FLIPIT_TOKEN_SECRET   — same HMAC secret used by issue-pro-token
+const { corsHeaders } = require('./_config');
 
 const crypto = require('crypto');
 
@@ -25,19 +26,7 @@ const TOKEN_PREFIX = 'flpt.';
 const TOKEN_TTL_SECONDS = 5 * 365 * 24 * 60 * 60; // 5 years
 
 exports.handler = __wrapErr( async function (event) {
-    const allowedOrigins = [
-        'https://flipit.earnwith-ai.com',
-        'https://flipit-app.netlify.app'
-    ];
-    const origin = event.headers?.origin || '';
-    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-
-    const headers = {
-        'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Content-Type': 'application/json'
-    };
+    const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
 
     if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
     if (event.httpMethod !== 'POST') {

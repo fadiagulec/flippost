@@ -21,6 +21,7 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 // Frontend stores the returned token as `localStorage.flipit_pro` and
 // sends it in the `X-Flipit-Pro` header on every gated request.
 // Server-side gates re-verify the HMAC before granting Pro.
+const { corsHeaders } = require('./_config');
 
 const crypto = require('crypto');
 const { enforceTokenIssueQuota, rateLimitResponse } = require('./_rate_limit');
@@ -31,16 +32,7 @@ const TOKEN_TTL_SECONDS = 365 * 24 * 60 * 60; // 1 year
 exports.handler = __wrapErr( async function (event) {
     // CORS allowlist matching every other AI endpoint. Keeps the netlify.app
     // origin during the domain-migration window; remove after 30 days.
-    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-    const origin = event.headers?.origin || '';
-    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-
-    const headers = {
-        'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Content-Type': 'application/json'
-    };
+    const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
 
     if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
     if (event.httpMethod !== 'POST') {

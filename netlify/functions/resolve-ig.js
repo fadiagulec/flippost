@@ -17,6 +17,7 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 //                                          { status:'running' } meanwhile,
 //                                          or { error } on failure.
 // The browser starts once then polls every few seconds until it gets a URL.
+const { corsHeaders } = require('./_config');
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
@@ -28,15 +29,7 @@ exports.handler = __wrapErr(async (event) => {
   const isPro = isProRequest(event);
   // Origin-allowlist CORS, mirroring download.js — this endpoint spends the
   // paid Apify token, so it must not be wildcard-callable from any site.
-  const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-  const origin = event.headers?.origin || '';
-  const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-  const headers = {
-    'Access-Control-Allow-Origin': corsOrigin,
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Content-Type': 'application/json'
-  };
+  const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
 

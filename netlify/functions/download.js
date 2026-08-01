@@ -3,9 +3,10 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 // Netlify function: /download
 // TikTok/YouTube -> Railway yt-dlp (base64), Twitter/X -> syndication API,
 // Instagram -> embed scrape + downloader links, others -> Cobalt/Microlink/OG
+const { corsHeaders, buildRailwayUrl, requireRailway, COBALT_URL: COBALT_BASE } = require('./_config');
 
-const COBALT_URL  = 'https://cobalt-api-production-4129.up.railway.app/';
-const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app/download';
+const COBALT_URL  = COBALT_BASE;
+const RAILWAY_URL = buildRailwayUrl("/download");
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
@@ -33,15 +34,7 @@ exports.handler = __wrapErr( async (event) => {
   // Origin-allowlist CORS — was '*'. download.js is the highest-risk wildcard
   // endpoint because it can be free-tier-called from any site (rate limit 3/day
   // per IP) and hits paid downstream (Cobalt, Railway yt-dlp).
-  const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-  const origin = event.headers?.origin || '';
-  const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-  const headers = {
-    'Access-Control-Allow-Origin': corsOrigin,
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Content-Type': 'application/json'
-  };
+  const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
   if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
   if (event.httpMethod !== 'POST') return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method not allowed' }) };
 
@@ -196,6 +189,8 @@ function detectPlatform(url) {
 }
 
 async function tryRailway(url, removeWatermark = false) {
+  // Optional path — skip cleanly when the owner hasn't deployed /backend yet.
+  if (!RAILWAY_URL) return null;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 25000);
   try {
@@ -225,6 +220,8 @@ async function tryRailway(url, removeWatermark = false) {
 }
 
 async function tryCobalt(url) {
+  // Optional fallback — skip when COBALT_URL isn't configured.
+  if (!COBALT_URL) return null;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   try {

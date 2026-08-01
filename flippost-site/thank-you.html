@@ -62,21 +62,23 @@
             <div class="step-text"><strong>Open Your Creator Vault</strong><span>Your Pro bonus: 100 proven hooks by niche + the posting playbook. Unlocks on this device once the app opens.</span></div>
         </div>
     </div>
-    <a href="https://flipit.earnwith-ai.com" class="btn">Launch FlipIt Now</a>
-    <a href="https://flipit.earnwith-ai.com/vault.html" class="btn btn-outline" style="border-color:#c2185b;color:#c2185b;">🎁 Open the Creator Vault</a>
-    <a href="mailto:contact@earnwith-ai.com" class="btn btn-outline">Need Help? Contact Support</a>
+    <a href="/" class="btn">Launch <span data-flipit="brand">FlipIt</span> Now</a>
+    <a href="/vault.html" class="btn btn-outline" style="border-color:#c2185b;color:#c2185b;">🎁 Open the Creator Vault</a>
+    <a data-flipit="email" href="#" class="btn btn-outline">Need Help? Contact Support</a>
     <p style="font-size:13px;color:#aaa;margin:-4px 0 10px;">Tip: bookmark this page — reopening your receipt link restores Pro on any device.</p>
     <div class="share-box">
         <h3>Love FlipIt? Tell a creator friend</h3>
         <p>No referral program yet — just a quick share if FlipIt saves you time.</p>
-        <a href="https://twitter.com/intent/tweet?text=Just+got+FlipIt+%E2%80%94+AI+tool+that+flips+viral+scripts+instantly.+https://flipit.earnwith-ai.com/sell" target="_blank" rel="noopener noreferrer" class="share-btn share-x">Share on X</a>
+        <a id="shareX" data-flipit="share-x" data-message="Just got {{brand}} — AI tool that flips viral scripts instantly." href="https://twitter.com/intent/tweet" target="_blank" rel="noopener noreferrer" class="share-btn share-x">Share on X</a>
     </div>
     <!-- Affiliate section removed — was promising a per-user referral link
          that didn't exist (Copy button just gave the public landing URL).
          Will re-add when a real attribution system is wired up. -->
 
 </div>
-<footer><p>&copy; 2026 FlipIt · <a href="mailto:contact@earnwith-ai.com">Contact</a></p></footer>
+<footer><p>&copy; <span data-flipit="year"></span> <span data-flipit="brand">FlipIt</span> · <a data-flipit="email" href="#">Contact</a></p></footer>
+<script src="config.js"></script>
+<script src="branding.js"></script>
 <script src="thank-you.js"></script>
 </body>
 </html>

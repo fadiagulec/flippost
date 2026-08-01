@@ -10,6 +10,7 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 //
 // Request:  POST { niche?: 'fitness' | hashtag?: 'fitnessmom', count?: 10 }
 // Response: 200 { results: [...], source: 'apify' | 'tiktok-web' | 'curated' }
+const { corsHeaders } = require('./_config');
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
@@ -105,15 +106,7 @@ exports.handler = __wrapErr( async function (event) {
     // Origin-allowlist CORS — was '*'. trending.js makes Claude calls under
     // the free-tier IP limit, so a malicious site could still burn ~3 calls
     // per visitor IP before throttling kicks in.
-    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-    const origin = event.headers?.origin || '';
-    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-    const headers = {
-        'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Content-Type': 'application/json'
-    };
+    const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
 
     if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
     if (event.httpMethod !== 'POST') {
