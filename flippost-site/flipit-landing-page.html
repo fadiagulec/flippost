@@ -555,7 +555,7 @@
 <!-- NAV -->
 <nav>
     <a href="#" class="nav-logo">FlipIt</a>
-    <a href="https://buy.stripe.com/28EcMY83I1XYd2i5r83Je0q" class="nav-cta">Get FlipIt &mdash; $57 &rarr;</a>
+    <a data-flipit="checkout" href="/get" class="nav-cta">Get FlipIt &mdash; $57 &rarr;</a>
 </nav>
 
 <!-- HERO -->
@@ -565,7 +565,7 @@
         <div class="proof-wrap">
             <div class="proof-cap">Paste any viral link &rarr; <strong>this is what comes out</strong> &mdash; a real FlipIt flip &darr;</div>
             <div class="proof-frame">
-                <div class="proof-bar"><i></i><i></i><i></i><em>flipit.earnwith-ai.com</em></div>
+                <div class="proof-bar"><i></i><i></i><i></i><em data-flipit="site-host"></em></div>
                 <img src="proof-viralscore.png" alt="Real FlipIt output — three scroll-stopping hooks generated from one viral video" loading="eager" width="828" height="214" />
             </div>
         </div>
@@ -650,7 +650,7 @@
             </div>
         </div>
         <div class="cta-group" style="margin-top:44px;">
-            <a href="https://buy.stripe.com/28EcMY83I1XYd2i5r83Je0q" class="btn btn-primary">&#9889; Get FlipIt &mdash; $57 Lifetime Access</a>
+            <a data-flipit="checkout" href="/get" class="btn btn-primary">&#9889; Get FlipIt &mdash; $57 Lifetime Access</a>
         </div>
         <p style="text-align:center;margin-top:12px;color:#999;font-size:14px;">One-time payment &middot; Instant access &middot; 30-day money-back guarantee</p>
     </div>
@@ -818,7 +818,7 @@
             <div class="price"><span class="strike">$99</span>$57</div>
             <p class="price-note">Your price today &mdash; one time. No subscription. Ever.</p>
 
-            <a href="https://buy.stripe.com/28EcMY83I1XYd2i5r83Je0q" class="btn btn-primary" style="width:100%;text-align:center;display:block;">
+            <a data-flipit="checkout" href="/get" class="btn btn-primary" style="width:100%;text-align:center;display:block;">
                 &#9889; Get FlipIt &mdash; $57 Lifetime
             </a>
             <div class="pc-guarantee">&#128737;&#65039; <strong>30-day money-back guarantee.</strong> Flip a few posts, score them, post them. If FlipIt doesn't save you hours and make your content easier to create, email us within 30 days &mdash; we'll refund every cent. No forms, no hoops.</div>
@@ -858,7 +858,7 @@
     <div class="container">
         <h2>Your next viral post is already in your feed.</h2>
         <p>Stop scrolling past it. Flip it into your voice, score it, and post with confidence &mdash; starting today.</p>
-        <a href="https://buy.stripe.com/28EcMY83I1XYd2i5r83Je0q" class="btn btn-white">&#9889; Get FlipIt &mdash; $57 Lifetime</a>
+        <a data-flipit="checkout" href="/get" class="btn btn-white">&#9889; Get FlipIt &mdash; $57 Lifetime</a>
         <p class="final-note">One-time payment &middot; Instant access &middot; 30-day money-back guarantee</p>
     </div>
 </section>
@@ -866,15 +866,17 @@
 <!-- FOOTER -->
 <footer>
     <div class="container">
-        <p>&copy; 2026 FlipIt · All rights reserved · <a href="mailto:contact@earnwith-ai.com">Contact</a> · <a href="mailto:contact@earnwith-ai.com?subject=FlipIt%20Refund%20Request">30-Day Refund Policy</a></p>
+        <p>&copy; <span data-flipit="year"></span> <span data-flipit="brand">FlipIt</span> · All rights reserved · <a data-flipit="email" href="#">Contact</a> · <a data-flipit="email" data-subject="Refund request" href="/refund.html"><span data-flipit="refund-days">30</span>-Day Refund Policy</a></p>
     </div>
 </footer>
 
+<script src="config.js"></script>
+<script src="branding.js"></script>
 <script src="landing-countdown.js"></script>
 
 <div class="buybar">
     <span class="bb-price"><s>$99</s>$57 &middot; lifetime</span>
-    <a href="https://buy.stripe.com/28EcMY83I1XYd2i5r83Je0q">Get FlipIt &rarr;</a>
+    <a data-flipit="checkout" href="/get">Get FlipIt &rarr;</a>
 </div>
 </body>
 </html>

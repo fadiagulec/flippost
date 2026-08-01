@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "FlipIt — Rate & Flip Posts",
+  "name": "FlipIt \u2014 Rate & Flip Posts",
   "short_name": "FlipIt",
   "version": "1.0.0",
-  "description": "Rate any Instagram/TikTok/YouTube post for viral potential and flip it into your own viral script — one click, no copy-paste.",
+  "description": "Rate any Instagram/TikTok/YouTube post for viral potential and flip it into your own viral script \u2014 one click, no copy-paste.",
   "author": "FlipIt",
   "homepage_url": "https://flipit.earnwith-ai.com",
   "icons": {
@@ -12,7 +12,9 @@
     "48": "icon-48.png",
     "128": "icon-128.png"
   },
-  "permissions": ["activeTab"],
+  "permissions": [
+    "activeTab"
+  ],
   "host_permissions": [
     "*://*.instagram.com/*",
     "*://*.tiktok.com/*",
@@ -45,7 +47,10 @@
         "*://twitter.com/*",
         "*://x.com/*"
       ],
-      "js": ["content.js"],
+      "js": [
+        "config.js",
+        "content.js"
+      ],
       "run_at": "document_idle"
     }
   ]

@@ -2,7 +2,7 @@
 //
 // Adds a floating "🎯 Rate with FlipIt" button to every supported social
 // site. The button reads the current page URL, normalizes it to a
-// canonical post URL, then opens https://flipit.earnwith-ai.com/?url=…
+// canonical post URL, then opens <your-site>/?url=…
 // which triggers the auto-flip handler on the FlipIt side.
 //
 // SAFETY: pure DOM injection, no scraping of post content (FlipIt does
@@ -11,7 +11,10 @@
 (function () {
     'use strict';
 
-    const FLIPIT_URL = 'https://flipit.earnwith-ai.com/';
+    // Site URL comes from config.js, which manifest.json loads immediately
+    // before this script — so a new owner edits one line, not this file.
+    const FLIPIT_URL = ((typeof FLIPIT_EXT_CONFIG !== 'undefined'
+        && FLIPIT_EXT_CONFIG.siteUrl) || '').replace(/\/+$/, '') + '/';
     const BUTTON_ID = 'flipit-fab-button';
 
     // Map of hostnames → "is this URL a single post / reel / video?" check.

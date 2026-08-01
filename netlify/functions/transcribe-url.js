@@ -5,19 +5,17 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 // server-side and runs Whisper. Tiny request body (just a URL), so no size
 // cap concerns. Direct-to-Railway is the primary path in the frontend; this
 // proxy is the fallback for networks that block *.up.railway.app.
+const { corsHeaders, buildRailwayUrl, requireRailway } = require('./_config');
 
-const RAILWAY_URL = 'https://web-production-8afc3.up.railway.app/transcribe-url';
+const RAILWAY_URL = buildRailwayUrl("/transcribe-url");
 
 exports.handler = __wrapErr(async function (event) {
-    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-    const origin = event.headers?.origin || '';
-    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-    const headers = {
-        'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Content-Type': 'application/json'
-    };
+    const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
+
+    // Self-hosted video backend is required for this endpoint. Returns a
+    // clear 503 (instead of a confusing fetch error) when RAILWAY_URL is unset.
+    const __noBackend = requireRailway(headers);
+    if (__noBackend) return __noBackend;
     if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, headers, body: JSON.stringify({ error: 'Method Not Allowed' }) };

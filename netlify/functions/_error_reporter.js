@@ -16,7 +16,13 @@
 //   - Safe to require multiple times; only patches console.error once.
 
 const WEBHOOK = process.env.ERROR_WEBHOOK_URL;
-const SITE = 'flipit.earnwith-ai.com';
+// Label attached to every reported error so one webhook can serve several
+// sites. Netlify sets URL automatically; SITE_URL overrides it.
+const SITE = (() => {
+    const raw = (process.env.SITE_URL || process.env.URL || '').trim();
+    if (!raw) return process.env.SITE_NAME || 'flipit';
+    return raw.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+})();
 
 const pending = new Set();
 

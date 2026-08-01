@@ -1,6 +1,12 @@
 # Local Netlify folder
 .netlify
 
+# Real secrets. `.env.example` IS tracked — it documents what to set and why,
+# with no real values. Anything that could hold a live key stays out.
+.env
+.env.*
+!.env.example
+
 # Node modules
 node_modules/
 
@@ -21,3 +27,11 @@ AUDIT.md
 # Chrome Web Store submission scratch (regenerated locally)
 submission-assets/
 
+
+# Video/media working files. These are large, regenerable, and not source —
+# an 11MB reel once got swept into a commit by `git add -A`.
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm

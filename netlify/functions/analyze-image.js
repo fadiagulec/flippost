@@ -1,3 +1,4 @@
+const { corsHeaders } = require('./_config');
 // Netlify Function: /analyze-image
 // Takes an image URL, sends it to Claude Vision, and returns
 // a detailed AI image prompt to recreate a similar image.
@@ -17,15 +18,7 @@ exports.handler = __wrapErr(async (event) => {
   // credits via this endpoint. The rate limiter caps per IP, but a
   // distributed attacker rotating residential proxies could still drain
   // funds before the cap triggers. Matches extract-and-twist pattern.
-  const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-  const origin = event.headers?.origin || '';
-  const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-  const headers = {
-    'Access-Control-Allow-Origin': corsOrigin,
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Content-Type': 'application/json'
-  };
+  const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
 
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 200, headers, body: '' };

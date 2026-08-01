@@ -16,21 +16,14 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 // Returns:  { success, transcript, segments:[{start,end,text}], duration, language }
 //
 // Requires OPENAI_API_KEY on the *Netlify* environment (separate from Railway).
+const { corsHeaders } = require('./_config');
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
 
 exports.handler = __wrapErr(async function (event) {
     const isPro = isProRequest(event);
-    const allowedOrigins = ['https://flipit.earnwith-ai.com', 'https://flipit-app.netlify.app'];
-    const origin = event.headers?.origin || '';
-    const corsOrigin = allowedOrigins.includes(origin) ? origin : allowedOrigins[0];
-    const headers = {
-        'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Content-Type': 'application/json'
-    };
+    const headers = corsHeaders(event, { methods: 'POST, OPTIONS' });
 
     if (event.httpMethod === 'OPTIONS') return { statusCode: 200, headers, body: '' };
     if (event.httpMethod !== 'POST') {

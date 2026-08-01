@@ -71,9 +71,9 @@ FlipIt is built to be paranoid-friendly:
   • The extension has NO background worker — it can't run when you're not on a supported site
   • The extension does NOT use cookies, analytics, ads, or fingerprinting
   • The ONLY data the extension touches is the URL of the tab you're on, and ONLY when you click the FlipIt button
-  • That URL is passed to flipit.earnwith-ai.com in a new tab — exactly as if you'd copy-pasted it yourself
+  • That URL is passed to your-domain.com in a new tab — exactly as if you'd copy-pasted it yourself
 
-Full privacy policy: https://flipit.earnwith-ai.com/privacy.html
+Full privacy policy: https://your-domain.com/privacy.html
 
 —— HOW TO USE ——
 
@@ -88,8 +88,8 @@ The Chrome extension is free. FlipIt itself is free for a generous number of fli
 
 —— SUPPORT ——
 
-Open an issue: https://github.com/fadiagulec/flipit
-Web app: https://flipit.earnwith-ai.com
+Open an issue: https://your-domain.com
+Web app: https://your-domain.com
 ```
 
 ---
@@ -188,7 +188,7 @@ For each "Does your extension collect or use…" checkbox:
 ## Privacy policy URL
 
 ```
-https://flipit.earnwith-ai.com/privacy.html
+https://your-domain.com/privacy.html
 ```
 
 (Make sure `flippost-site/privacy.html` is deployed on Netlify before submitting — see SUBMISSION-GUIDE.md.)
@@ -198,7 +198,7 @@ https://flipit.earnwith-ai.com/privacy.html
 ## Homepage URL
 
 ```
-https://flipit.earnwith-ai.com
+https://your-domain.com
 ```
 
 ---
@@ -206,7 +206,7 @@ https://flipit.earnwith-ai.com
 ## Support email
 
 ```
-contact@earnwith-ai.com
+support@your-domain.com
 ```
 
 ---

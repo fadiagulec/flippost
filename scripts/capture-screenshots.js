@@ -1,13 +1,17 @@
 // Capture Chrome Web Store screenshots for FlipIt at 1280x800.
 //
 // Strategy:
-//  - Try real flipit.earnwith-ai.com screenshots (no login wall) for shots 1 & 2.
+//  - Try real live-site screenshots (no login wall) for shots 1 & 2.
+//    Set SITE_URL to your deployed app, e.g.
+//      SITE_URL=https://flipit.mydomain.com node scripts/capture-screenshots.js
 //  - For shots 3 & 4, attempt a real post URL (Instagram / TikTok / YouTube);
 //    if login walls appear, fall back to local mockup HTML pages that visually
 //    represent the extension button overlaid on a generic short-form video UI.
 //  - Always render the local rating-card mockup as shot 5.
 //
 // Output: submission-assets/screenshot-1.png … screenshot-5.png
+
+const SITE = (process.env.SITE_URL || 'https://your-domain.com').replace(/\/+$/, '');
 
 const { chromium } = require('playwright');
 const path = require('path');
@@ -109,7 +113,7 @@ async function snapLive(browser, url, outName, opts = {}) {
 
   // Shot 1 — FlipIt homepage (real)
   console.log('Shot 1: FlipIt homepage');
-  const s1 = await snapLive(browser, 'https://flipit.earnwith-ai.com/', 'screenshot-1.png', { wait: 2500 });
+  const s1 = await snapLive(browser, SITE + '/', 'screenshot-1.png', { wait: 2500 });
   if (!s1) {
     console.log('  homepage failed, using score-card mockup as fallback');
     await snapMockup(browser, path.join(MOCK, 'score-card.html'), 'screenshot-1.png');
@@ -131,7 +135,7 @@ async function snapLive(browser, url, outName, opts = {}) {
   console.log('Shot 5: FlipIt homepage with deep-link');
   const s5 = await snapLive(
     browser,
-    'https://flipit.earnwith-ai.com/?url=https%3A%2F%2Fwww.instagram.com%2Freel%2FCxYz123%2F',
+    SITE + '/?url=https%3A%2F%2Fwww.instagram.com%2Freel%2FCxYz123%2F',
     'screenshot-5.png',
     { wait: 3000 }
   );
