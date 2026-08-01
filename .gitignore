@@ -27,3 +27,11 @@ AUDIT.md
 # Chrome Web Store submission scratch (regenerated locally)
 submission-assets/
 
+
+# Video/media working files. These are large, regenerable, and not source —
+# an 11MB reel once got swept into a commit by `git add -A`.
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.webm

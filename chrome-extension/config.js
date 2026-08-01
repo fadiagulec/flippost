@@ -7,10 +7,10 @@
 
 var FLIPIT_EXT_CONFIG = {
     // Your live app, e.g. 'https://flipit.mydomain.com'
-    siteUrl: 'https://your-domain.com',
+    siteUrl: 'https://flipit.earnwith-ai.com',
 
     // Shown in the popup header.
-    brandName: 'FlipIt'
+    brandName: "FlipIt"
 };
 
 // Available to both the popup (classic script) and the content script

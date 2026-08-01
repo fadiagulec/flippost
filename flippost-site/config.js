@@ -20,13 +20,13 @@ window.FLIPIT_CONFIG = {
 
     // ── Brand ────────────────────────────────────────────────────────────
     // Shown in buttons, headings and system messages.
-    brandName: 'FlipIt',
+    brandName: "FlipIt",
 
     // Your public site address, no trailing slash.
     // Leave '' to auto-detect from the browser's address bar — correct for
     // almost everyone. Set it explicitly only if you generate share links
     // that must always point at one canonical domain.
-    siteUrl: '',
+    siteUrl: "https://flipit.earnwith-ai.com",
 
     // ── Money ────────────────────────────────────────────────────────────
     // Checkout destination. '/get' is a server route that redirects to the
@@ -38,27 +38,27 @@ window.FLIPIT_CONFIG = {
     // Displayed prices. Purely cosmetic — the amount actually charged is
     // whatever your Stripe Payment Link is configured for. Keep them in
     // sync with Stripe or customers will (rightly) complain.
-    price: '$57',          // what they pay
-    priceAnchor: '$99',    // crossed-out "was" price; set '' to hide
+    price: "$57",          // what they pay
+    priceAnchor: "$99",    // crossed-out "was" price; set '' to hide
 
     // ── Contact ──────────────────────────────────────────────────────────
     // Used for support links, refund requests and legal pages.
-    supportEmail: 'support@example.com',
+    supportEmail: "contact@earnwith-ai.com",
 
     // Legal entity name + governing law shown on terms/privacy/refund pages.
-    legalEntity: 'FlipIt',
-    legalJurisdiction: 'England and Wales',
+    legalEntity: "FlipIt",
+    legalJurisdiction: "England and Wales",
 
     // ── Optional extras ──────────────────────────────────────────────────
     // Direct URL of your own deployed /backend service (Railway, Render,
     // Fly.io…). Used as a fast path for large video jobs; when empty, every
     // request routes through your Netlify functions instead, which always
     // works but is slower for big files. Safe to leave ''.
-    railwayBase: '',
+    railwayBase: "https://web-production-8afc3.up.railway.app",
 
     // Where "Install the Chrome extension" points. Chrome Web Store URL
     // once published; '' hides the link.
-    extensionUrl: '',
+    extensionUrl: "",
 
     // Refund window in days, shown on the refund page and in copy.
     refundDays: 30
