@@ -14,6 +14,7 @@ const { wrap: __wrapErr } = require('./_error_reporter');
 //   { score: 0-10, verdict: string, summary: string,
 //     dimensions: [{ key, label, score: 0-100, comment }] }
 const { corsHeaders } = require('./_config');
+const { humanVoiceFor, HUMAN_HASHTAG_RULES } = require('./_human_voice');
 
 const { isProRequest } = require('./_pro_verify');
 const { enforceAiQuota, rateLimitResponse } = require('./_rate_limit');
@@ -164,7 +165,10 @@ exports.handler = __wrapErr(async function (event) {
         "rewrite: the single BEST full caption — rewrite the whole post so it scores 9-10 (aim for 10). Ready to paste, with line breaks. Keep it TIGHT — under ~120 words (longer only for a long spoken script).",
         voiceContext ? "If a <brand_voice> is given, write the rewrite and fixes wording in THAT voice; keep scoring objective." : "",
         "",
-        "Be economical: each dimension 'comment' is ONE short sentence. Be honest — a mid post gets a 4-5, not a participation-trophy 7."
+        "Be economical: each dimension 'comment' is ONE short sentence. Be honest — a mid post gets a 4-5, not a participation-trophy 7.",
+        // The rewrite is copy the creator will actually post, so it has to
+        // pass as human. The scorecard prose is internal and unaffected.
+        humanVoiceFor(platform)
     ].filter(Boolean).join('\n');
     const userScore = `Score this ${platform} post.\n\n${contextBlock}\n\nCall the scorecard tool now.`;
 
@@ -174,7 +178,9 @@ exports.handler = __wrapErr(async function (event) {
         "hooks: 3 alternative FIRST-LINE hooks (opening line only), each a scroll-stopper strong enough to score 10/10. Vary the angle — one curiosity gap, one bold claim/number, one relatable pain.",
         "altCaptions: 2 alternative FULL captions, each a DIFFERENT angle (story-led, list-led, contrarian). Keep each tight (~60-90 words), ready to paste.",
         "recommendedHashtags: 10-14 hashtags to actually use — a mix of broad-reach, niche, and branded. No spaces; no leading # needed.",
-        voiceContext ? "If a <brand_voice> is given, write the hooks and altCaptions in THAT voice." : ""
+        voiceContext ? "If a <brand_voice> is given, write the hooks and altCaptions in THAT voice." : "",
+        HUMAN_HASHTAG_RULES,
+        humanVoiceFor(platform)
     ].filter(Boolean).join('\n');
     const userExtras = `For this ${platform} post, generate stronger hooks, 2 alternative captions, and recommended hashtags.\n\n${contextBlock}\n\nCall the extras tool now.`;
 
