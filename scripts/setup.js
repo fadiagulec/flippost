@@ -111,6 +111,17 @@ async function main() {
     // ── 1. front-end runtime config ─────────────────────────────────────
     const cfgPath = path.join(SITE_DIR, 'config.js');
     let cfg = fs.readFileSync(cfgPath, 'utf8');
+
+    // What's baked into the repo right now. Captured BEFORE we overwrite the
+    // config so re-running setup replaces the previous domain, not just the
+    // original placeholder — otherwise a second run silently leaves the last
+    // owner's domain in the SEO tags, sitemap and extension.
+    const prevSite = (cfg.match(/\n\s*siteUrl:\s*['"]([^'"]*)['"]/) || [])[1] || '';
+    const prevBackend = (cfg.match(/\n\s*railwayBase:\s*['"]([^'"]*)['"]/) || [])[1] || '';
+    const oldSiteUrls = [PLACEHOLDER, prevSite]
+        .map((u) => String(u || '').replace(/\/+$/, ''))
+        .filter((u) => u && u !== site);
+
     const setField = (key, value) => {
         const re = new RegExp(`(\\n\\s*${key}:\\s*)('[^']*'|"[^"]*"|\\d+)`);
         if (!re.test(cfg)) {
@@ -134,18 +145,28 @@ async function main() {
 
     // ── 2. crawler-visible files (JS can't fix these) ────────────────────
     if (site && site !== PLACEHOLDER) {
+        const swaps = oldSiteUrls.map((old) => [old, site]);
         for (const f of ['index.html', 'share.html', 'flipit-landing-page.html',
                          'sitemap.xml', 'robots.txt']) {
-            if (rewrite(path.join(SITE_DIR, f), [[PLACEHOLDER, site]])) {
+            if (rewrite(path.join(SITE_DIR, f), swaps)) {
                 changed.push('flippost-site/' + f);
             }
         }
         // ── 3. Chrome extension ─────────────────────────────────────────
-        if (rewrite(path.join(EXT_DIR, 'config.js'),
-                    [[PLACEHOLDER, site], ["brandName: 'FlipIt'", `brandName: ${jsString(brand)}`]])) {
+        // URL by literal swap, brand by regex — the old brand value is
+        // unknown on a re-run, so there's nothing literal to match on.
+        const extCfgPath = path.join(EXT_DIR, 'config.js');
+        const extBefore = fs.readFileSync(extCfgPath, 'utf8');
+        let extAfter = extBefore;
+        for (const [from, to] of swaps) extAfter = extAfter.split(from).join(to);
+        extAfter = extAfter.replace(/(\n\s*brandName:\s*)('[^']*'|"[^"]*")/,
+                                    (m, lead) => lead + jsString(brand));
+        if (extAfter !== extBefore) {
+            fs.writeFileSync(extCfgPath, extAfter);
             changed.push('chrome-extension/config.js');
         }
-        if (rewrite(path.join(EXT_DIR, 'manifest.json'), [[PLACEHOLDER, site]])) {
+
+        if (rewrite(path.join(EXT_DIR, 'manifest.json'), swaps)) {
             changed.push('chrome-extension/manifest.json');
         }
     }
@@ -153,16 +174,27 @@ async function main() {
     // ── 4. CSP: let the browser talk to your own backend directly ────────
     // Without this the strict connect-src blocks the fast path and every
     // large video job takes the slower Netlify proxy route.
+    const tomlPath = path.join(ROOT, 'netlify.toml');
+    let toml = fs.readFileSync(tomlPath, 'utf8');
+    const tomlBefore = toml;
+
+    // Drop the previous backend origin first, so re-running setup doesn't
+    // leave the last owner's host whitelisted in the CSP forever.
+    if (prevBackend && prevBackend !== backend) {
+        try {
+            toml = toml.split(' ' + new URL(prevBackend).origin).join('');
+        } catch { /* previous value wasn't a URL — nothing to strip */ }
+    }
     if (backend) {
-        const tomlPath = path.join(ROOT, 'netlify.toml');
-        let toml = fs.readFileSync(tomlPath, 'utf8');
         const origin = new URL(backend).origin;
         if (!toml.includes(origin)) {
             toml = toml.replace(/connect-src 'self'([^;"]*)/,
                 (m, rest) => `connect-src 'self'${rest} ${origin}`);
-            fs.writeFileSync(tomlPath, toml);
-            changed.push('netlify.toml (CSP connect-src)');
         }
+    }
+    if (toml !== tomlBefore) {
+        fs.writeFileSync(tomlPath, toml);
+        changed.push('netlify.toml (CSP connect-src)');
     }
 
     // ── 5. secrets you paste into Netlify ────────────────────────────────

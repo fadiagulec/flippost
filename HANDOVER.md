@@ -61,8 +61,12 @@ git commit -m "Initial commit"
 
 Then hand over that folder (or push it to a private repo and transfer it).
 
-**3. Reset the config to placeholders**, so the buyer's first `npm run check`
-tells them exactly what to fill in rather than silently shipping your brand:
+**3. Reset the config to placeholders.** `npm run setup` is idempotent — a
+buyer running it over your values replaces them cleanly, including the CSP
+entry for your backend — so this step is belt-and-braces rather than
+required. Do it anyway: it means the buyer's first `npm run check` tells them
+exactly what to fill in, instead of silently shipping your brand if they skip
+setup entirely.
 
 ```bash
 node scripts/setup.js --site https://your-domain.com \

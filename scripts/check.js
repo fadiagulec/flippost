@@ -27,15 +27,28 @@ const err = (m) => errors.push(m);
 const warn = (m) => warnings.push(m);
 const pass = (m) => passes.push(m);
 
+// Directories that are caches or build output, not source. `.netlify` in
+// particular holds a stale copy of a previous build's netlify.toml, which
+// would otherwise be reported as a problem in files you never edit.
+const SKIP_DIRS = new Set(['.git', 'node_modules', '.netlify', 'dist', 'build',
+                           '.next', '.cache', 'submission-assets']);
+
 function walk(dir, out) {
     out = out || [];
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (entry.name === '.git' || entry.name === 'node_modules') continue;
+        if (SKIP_DIRS.has(entry.name)) continue;
         const p = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(p, out);
         else out.push(p);
     }
     return out;
+}
+
+// Always compare paths with forward slashes. path.relative() returns
+// backslashes on Windows, so a plain === against 'scripts/check.js' silently
+// never matched there and this file flagged itself.
+function relPath(f) {
+    return path.relative(ROOT, f).split(path.sep).join('/');
 }
 
 const TEXT_EXT = new Set(['.js', '.mts', '.html', '.json', '.md', '.toml',
@@ -52,34 +65,14 @@ for (const f of files.filter((f) => f.endsWith('.js'))) {
         // ES-module-only syntax is expected in a few places; flag the rest.
         if (/import\s|export\s/.test(src)) continue;
         syntaxBad++;
-        err(`Syntax error in ${path.relative(ROOT, f)}: ${e.message}`);
+        err(`Syntax error in ${relPath(f)}: ${e.message}`);
     }
 }
 if (!syntaxBad) pass('All JavaScript files parse');
 
-// ── 2. no leftover values from a previous owner ──────────────────────────
-// If you bought this app and see failures here, run `npm run setup`.
-const STALE = [
-    { re: /earnwith-ai\.com/i, what: "a previous owner's domain" },
-    { re: /fadiagulec/i, what: "a previous owner's email/GitHub handle" },
-    { re: /web-production-8afc3\.up\.railway\.app/i, what: "a previous owner's backend URL" },
-    { re: /buy\.stripe\.com\/[A-Za-z0-9]{10,}/, what: 'a hardcoded Stripe payment link' }
-];
-let staleHits = 0;
-for (const f of files) {
-    const rel = path.relative(ROOT, f);
-    if (rel === 'scripts/check.js') continue;           // this file lists them on purpose
-    const src = fs.readFileSync(f, 'utf8');
-    for (const { re, what } of STALE) {
-        if (re.test(src)) {
-            staleHits++;
-            err(`${rel} still contains ${what}`);
-        }
-    }
-}
-if (!staleHits) pass('No previous-owner values anywhere in the repo');
-
-// ── 3. front-end config is filled in ─────────────────────────────────────
+// ── 2. load the front-end config ─────────────────────────────────────────
+// Loaded before the stale scan because "is this value stale?" depends on
+// what the current owner has actually configured.
 const cfgPath = path.join(SITE_DIR, 'config.js');
 let cfg = null;
 try {
@@ -91,6 +84,62 @@ try {
     err('Could not load flippost-site/config.js: ' + e.message);
 }
 
+// ── 3. no leftover values from a PREVIOUS owner ──────────────────────────
+// The markers below identify the owner this codebase shipped from. They are
+// only a problem when they DON'T match what's configured now — on the
+// original owner's own deploy, their domain and backend are correct and must
+// not be reported. If you bought this app and see failures here, the fix is
+// `npm run setup`.
+const host = (u) => {
+    try { return new URL(String(u || '')).hostname.toLowerCase(); }
+    catch { return ''; }
+};
+const configuredHost = host(cfg && cfg.siteUrl);
+const configuredBackend = host(cfg && cfg.railwayBase);
+const configuredEmail = String((cfg && cfg.supportEmail) || '').toLowerCase();
+
+const STALE = [
+    {
+        re: /earnwith-ai\.com/i,
+        what: "a previous owner's domain",
+        // Owned when it IS the configured site or support-email domain.
+        owned: () => configuredHost.endsWith('earnwith-ai.com')
+                  || configuredEmail.endsWith('earnwith-ai.com')
+    },
+    {
+        re: /fadiagulec/i,
+        what: "a previous owner's email/GitHub handle",
+        owned: () => configuredEmail.includes('fadiagulec')
+    },
+    {
+        re: /web-production-8afc3\.up\.railway\.app/i,
+        what: "a previous owner's backend URL",
+        owned: () => configuredBackend === 'web-production-8afc3.up.railway.app'
+    },
+    {
+        // Payment links belong in the STRIPE_PAYMENT_LINK env var, never in
+        // the repo — so this one is always a problem, for any owner.
+        re: /buy\.stripe\.com\/[A-Za-z0-9]{10,}/,
+        what: 'a hardcoded Stripe payment link (it belongs in STRIPE_PAYMENT_LINK)',
+        owned: () => false
+    }
+];
+
+let staleHits = 0;
+for (const f of files) {
+    const rel = relPath(f);
+    if (rel === 'scripts/check.js') continue;           // this file lists them on purpose
+    const src = fs.readFileSync(f, 'utf8');
+    for (const { re, what, owned } of STALE) {
+        if (re.test(src) && !owned()) {
+            staleHits++;
+            err(`${rel} still contains ${what}`);
+        }
+    }
+}
+if (!staleHits) pass('No previous-owner values anywhere in the repo');
+
+// ── 4. front-end config is filled in ─────────────────────────────────────
 if (cfg) {
     if (!cfg.supportEmail || /example\.com$/i.test(cfg.supportEmail)) {
         err('config.js supportEmail is still a placeholder — customers cannot reach you.');
@@ -109,7 +158,7 @@ if (cfg) {
     }
 }
 
-// ── 4. crawler-visible URLs ──────────────────────────────────────────────
+// ── 5. crawler-visible URLs ──────────────────────────────────────────────
 const seoFiles = ['index.html', 'share.html', 'flipit-landing-page.html',
                   'sitemap.xml', 'robots.txt'];
 const seoStale = seoFiles.filter((f) => {
@@ -123,7 +172,7 @@ if (seoStale.length) {
     pass('SEO / share tags point at a real domain');
 }
 
-// ── 5. every page loads the config before the code that reads it ─────────
+// ── 6. every page loads the config before the code that reads it ─────────
 for (const f of fs.readdirSync(SITE_DIR).filter((f) => f.endsWith('.html'))) {
     const src = fs.readFileSync(path.join(SITE_DIR, f), 'utf8');
     if (!src.includes('config.js')) {
@@ -138,7 +187,7 @@ for (const f of fs.readdirSync(SITE_DIR).filter((f) => f.endsWith('.html'))) {
 }
 pass('All pages load config.js first');
 
-// ── 6. functions use the shared config, not hardcoded origins ────────────
+// ── 7. functions use the shared config, not hardcoded origins ────────────
 const hardcodedCors = fs.readdirSync(FN_DIR)
     .filter((f) => f.endsWith('.js'))
     .filter((f) => /allowedOrigins\s*=\s*\[/.test(fs.readFileSync(path.join(FN_DIR, f), 'utf8')));
@@ -148,7 +197,7 @@ if (hardcodedCors.length) {
     pass('All functions read CORS origins from _config.js');
 }
 
-// ── 7. env vars, when running somewhere they exist ───────────────────────
+// ── 8. env vars, when running somewhere they exist ───────────────────────
 const REQUIRED_ENV = [
     ['ANTHROPIC_API_KEY', 'every AI feature returns an error'],
     ['STRIPE_SECRET_KEY', 'purchases cannot be verified — buyers get no access'],
