@@ -1,3 +1,6 @@
+// Force fresh Netlify bundle — a stale build was crashing on load with
+// "buildRailwayUrl is not a function" (dead code that no longer exists in
+// this source). Rebuilding from current source clears it.
 require('./_error_reporter');
 const { wrap: __wrapErr } = require('./_error_reporter');
 const { corsHeaders, buildRailwayUrl, requireRailway } = require('./_config');
