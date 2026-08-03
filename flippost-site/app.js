@@ -1607,6 +1607,34 @@ function appendSection(container, title, text, copyable) {
         div.appendChild(btn);
     }
     container.appendChild(div);
+    return div;
+}
+
+// Adds a "🧑 Humanize" button to a rendered .result-section — rewrites that
+// section's text to sound human (strips AI tells), in place.
+function appendHumanizeButton(sectionDiv) {
+    if (!sectionDiv || typeof humanizeText !== 'function') return;
+    const p = sectionDiv.querySelector('.result-text');
+    if (!p) return;
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = '\u{1F9D1} Humanize';
+    btn.title = 'Rewrite to sound human — strip AI tells';
+    btn.style.marginLeft = '8px';
+    btn.onclick = async () => {
+        btn.disabled = true;
+        btn.textContent = '⏳ Humanizing…';
+        try {
+            const out = await humanizeText(p.textContent);
+            p.textContent = out;
+            btn.textContent = '✅ Humanized';
+            setTimeout(() => { btn.textContent = '\u{1F9D1} Humanize'; btn.disabled = false; }, 1600);
+        } catch (e) {
+            btn.textContent = '❌ retry';
+            setTimeout(() => { btn.textContent = '\u{1F9D1} Humanize'; btn.disabled = false; }, 2000);
+        }
+    };
+    sectionDiv.appendChild(btn);
 }
 
 // ── PROMPT BUTTONS (Video + Image) ──────────────────────
@@ -1828,7 +1856,7 @@ async function handleRewriteScript() {
         // Tag the Flipped Version section so remix-by-instruction can replace
         // its output in place without disturbing the Original section.
         const flippedSection = container.lastElementChild;
-        if (flippedSection) flippedSection.classList.add('remix-flipped-section');
+        if (flippedSection) { flippedSection.classList.add('remix-flipped-section'); appendHumanizeButton(flippedSection); }
         if (data.hook) appendSection(container, '\u{1F3AF} Proven Hook', data.hook, true);
         if (data.cta) appendSection(container, '\u{1F4E3} Call to Action', data.cta, true);
         // Richer output from the deeper-output backend (optional — only present
@@ -1836,7 +1864,7 @@ async function handleRewriteScript() {
         if (Array.isArray(data.scenes) && data.scenes.length) {
             appendSection(container, '\u{1F3AC} Scene-by-Scene', data.scenes.join('\n'), true);
         }
-        if (data.caption) appendSection(container, '\u{1F4DD} Ready-to-Post Caption', data.caption, true);
+        if (data.caption) appendHumanizeButton(appendSection(container, '\u{1F4DD} Ready-to-Post Caption', data.caption, true));
         if (data.hashtags) appendSection(container, '#️⃣ Hashtags', data.hashtags, true);
         recordFlipSuccess();
 
@@ -3832,6 +3860,28 @@ function showSuccess(msg, id) {
             }).catch(() => {});
         });
         actions.appendChild(copyBtn);
+
+        const humanizeBtn = document.createElement('button');
+        humanizeBtn.type = 'button';
+        humanizeBtn.textContent = '🧑 Humanize';
+        humanizeBtn.title = 'Rewrite the transcript to sound human';
+        humanizeBtn.style.cssText = 'flex:1;min-width:140px;padding:12px;background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;border-radius:8px;font-weight:700;font-size:14px;cursor:pointer;';
+        humanizeBtn.addEventListener('click', async () => {
+            if (typeof humanizeText !== 'function') return;
+            humanizeBtn.disabled = true;
+            const old = humanizeBtn.textContent;
+            humanizeBtn.textContent = '⏳ Humanizing…';
+            try {
+                const out = await humanizeText(full.textContent);
+                full.textContent = out;
+                humanizeBtn.textContent = '✅ Humanized';
+                setTimeout(() => { humanizeBtn.textContent = old; humanizeBtn.disabled = false; }, 1600);
+            } catch (e) {
+                humanizeBtn.textContent = '❌ retry';
+                setTimeout(() => { humanizeBtn.textContent = old; humanizeBtn.disabled = false; }, 2000);
+            }
+        });
+        actions.appendChild(humanizeBtn);
 
         const flipBtn = document.createElement('button');
         flipBtn.type = 'button';
