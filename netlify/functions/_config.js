@@ -53,7 +53,10 @@ const PRICE_LABEL = envStr('PRICE_LABEL', '$57');
 const STRIPE_PAYMENT_LINK = envStr('STRIPE_PAYMENT_LINK', '');
 
 // ── Downstream services (the buyer's own deployments) ────────────────────
-const RAILWAY_URL = stripSlash(envStr('RAILWAY_URL', ''));
+// Fallback to the current live Railway backend so video/transcribe features
+// keep working even if the RAILWAY_URL env var isn't set (a new owner sets
+// their own RAILWAY_URL, which overrides this).
+const RAILWAY_URL = stripSlash(envStr('RAILWAY_URL', 'https://web-production-8afc3.up.railway.app'));
 const COBALT_URL = stripSlash(envStr('COBALT_URL', ''));
 
 // ── CORS ─────────────────────────────────────────────────────────────────
@@ -163,6 +166,10 @@ module.exports = {
     corsHeaders,
     requireRailway,
     railwayUrl,
+    // Alias: several functions import this name. Same function as railwayUrl.
+    // Its absence (undefined) crashed extract-and-twist + transcribe-async on
+    // load with "buildRailwayUrl is not a function".
+    buildRailwayUrl: railwayUrl,
     supportSuffix,
     // Netlify bundles this file as a function; return a clean 404 on probes.
     handler: async function handler() {
