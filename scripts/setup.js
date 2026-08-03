@@ -144,7 +144,11 @@ async function main() {
     changed.push('flippost-site/config.js');
 
     // ── 2. crawler-visible files (JS can't fix these) ────────────────────
-    if (site && site !== PLACEHOLDER) {
+    // Runs whenever there is an old URL to replace — including a reset back
+    // TO the placeholder, which is how `npm run package` scrubs a copy for a
+    // buyer. Guarding on `site !== PLACEHOLDER` used to skip that case and
+    // left the previous owner's domain in the SEO tags and the extension.
+    if (site && oldSiteUrls.length) {
         const swaps = oldSiteUrls.map((old) => [old, site]);
         for (const f of ['index.html', 'share.html', 'flipit-landing-page.html',
                          'sitemap.xml', 'robots.txt']) {
