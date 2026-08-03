@@ -2990,7 +2990,7 @@ function showSuccess(msg, id) {
             up.appendChild(uh);
 
             // A labeled box with its own Copy button.
-            const copyBox = (label, text, bg) => {
+            const copyBox = (label, text, bg, canHumanize) => {
                 if (label) {
                     const l = document.createElement('div');
                     l.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:14px;margin:14px 0 6px;';
@@ -3001,13 +3001,34 @@ function showSuccess(msg, id) {
                 box.style.cssText = 'white-space:pre-wrap;background:' + (bg || '#f0faf8') + ';border:1px solid #bfe3dd;border-radius:10px;padding:12px;font-size:14px;line-height:1.6;color:#124;';
                 box.textContent = text;
                 up.appendChild(box);
+                let current = text;
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;';
                 const c = document.createElement('button');
                 c.textContent = '📋 Copy';
-                c.style.cssText = 'margin-top:6px;padding:8px 13px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
+                c.style.cssText = 'padding:8px 13px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
                 c.addEventListener('click', () => {
-                    navigator.clipboard.writeText(text).then(() => { c.textContent = '✅ Copied'; setTimeout(() => { c.textContent = '📋 Copy'; }, 1500); }).catch(() => {});
+                    navigator.clipboard.writeText(current).then(() => { c.textContent = '✅ Copied'; setTimeout(() => { c.textContent = '📋 Copy'; }, 1500); }).catch(() => {});
                 });
-                up.appendChild(c);
+                row.appendChild(c);
+                if (canHumanize && typeof humanizeText === 'function') {
+                    const h = document.createElement('button');
+                    h.textContent = '🧑 Humanize';
+                    h.title = 'Rewrite to sound human — strip AI tells';
+                    h.style.cssText = 'padding:8px 13px;background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;border-radius:8px;font-weight:600;font-size:13px;cursor:pointer;';
+                    h.addEventListener('click', async () => {
+                        h.disabled = true; h.textContent = '⏳ Humanizing…';
+                        try {
+                            const out = await humanizeText(current);
+                            current = out; box.textContent = out;
+                            h.textContent = '✅ Humanized'; setTimeout(() => { h.textContent = '🧑 Humanize'; h.disabled = false; }, 1600);
+                        } catch (e) {
+                            h.textContent = '❌ ' + (e.message || 'failed').slice(0, 22); setTimeout(() => { h.textContent = '🧑 Humanize'; h.disabled = false; }, 2200);
+                        }
+                    });
+                    row.appendChild(h);
+                }
+                up.appendChild(row);
             };
 
             // Fixes
@@ -3045,8 +3066,8 @@ function showSuccess(msg, id) {
             }
 
             // Best caption (the rewrite) + alternatives
-            if (data.rewrite) copyBox('✅ Best caption — post this', data.rewrite);
-            A(data.altCaptions).forEach((c, i) => copyBox('✍️ Alternative caption ' + (i + 1), c, '#f7f9fb'));
+            if (data.rewrite) copyBox('✅ Best caption — post this', data.rewrite, '#f0faf8', true);
+            A(data.altCaptions).forEach((c, i) => copyBox('✍️ Alternative caption ' + (i + 1), c, '#f7f9fb', true));
 
             // Recommended hashtags
             if (A(data.recommendedHashtags).length) {
@@ -4089,7 +4110,7 @@ function showSuccess(msg, id) {
             uh.textContent = '🔧 Make it a 9–10';
             up.appendChild(uh);
 
-            const copyBox = (label, text, bg) => {
+            const copyBox = (label, text, bg, canHumanize) => {
                 if (label) {
                     const l = document.createElement('div');
                     l.style.cssText = 'font-weight:700;color:#1a1a2e;font-size:13px;margin:12px 0 5px;';
@@ -4100,11 +4121,26 @@ function showSuccess(msg, id) {
                 box.style.cssText = 'white-space:pre-wrap;background:' + (bg || '#f0faf8') + ';border:1px solid #bfe3dd;border-radius:10px;padding:11px;font-size:13px;line-height:1.55;color:#124;';
                 box.textContent = text;
                 up.appendChild(box);
+                let current = text;
+                const row = document.createElement('div');
+                row.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;';
                 const c = document.createElement('button');
                 c.textContent = '📋 Copy';
-                c.style.cssText = 'margin-top:6px;padding:7px 12px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer;';
-                c.addEventListener('click', () => { navigator.clipboard.writeText(text).then(() => { c.textContent = '✅ Copied'; setTimeout(() => { c.textContent = '📋 Copy'; }, 1500); }).catch(() => {}); });
-                up.appendChild(c);
+                c.style.cssText = 'padding:7px 12px;background:#0d6e66;color:#fff;border:none;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer;';
+                c.addEventListener('click', () => { navigator.clipboard.writeText(current).then(() => { c.textContent = '✅ Copied'; setTimeout(() => { c.textContent = '📋 Copy'; }, 1500); }).catch(() => {}); });
+                row.appendChild(c);
+                if (canHumanize && typeof humanizeText === 'function') {
+                    const h = document.createElement('button');
+                    h.textContent = '🧑 Humanize'; h.title = 'Rewrite to sound human';
+                    h.style.cssText = 'padding:7px 12px;background:#fff;color:#0d6e66;border:1.5px solid #0d6e66;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer;';
+                    h.addEventListener('click', async () => {
+                        h.disabled = true; h.textContent = '⏳…';
+                        try { const out = await humanizeText(current); current = out; box.textContent = out; h.textContent = '✅ Humanized'; setTimeout(() => { h.textContent = '🧑 Humanize'; h.disabled = false; }, 1600); }
+                        catch (e) { h.textContent = '❌ retry'; setTimeout(() => { h.textContent = '🧑 Humanize'; h.disabled = false; }, 2000); }
+                    });
+                    row.appendChild(h);
+                }
+                up.appendChild(row);
             };
 
             if (A(data.fixes).length) {
@@ -4133,8 +4169,8 @@ function showSuccess(msg, id) {
                     row.appendChild(t); row.appendChild(cp); up.appendChild(row);
                 });
             }
-            if (data.rewrite) copyBox('✅ Best caption — post this', data.rewrite);
-            A(data.altCaptions).forEach((c, i) => copyBox('✍️ Alternative caption ' + (i + 1), c, '#f7f9fb'));
+            if (data.rewrite) copyBox('✅ Best caption — post this', data.rewrite, '#f0faf8', true);
+            A(data.altCaptions).forEach((c, i) => copyBox('✍️ Alternative caption ' + (i + 1), c, '#f7f9fb', true));
             if (A(data.recommendedHashtags).length) copyBox('🔖 Recommended hashtags', data.recommendedHashtags.join(' '), '#f7f9fb');
 
             body.appendChild(up);
@@ -4625,6 +4661,28 @@ async function transcribeViaPoll(fetchUrl, onTick) {
         // else status:'running' — keep polling
     }
     throw new Error('Transcription is taking too long — try a shorter clip (under ~25 min).');
+}
+
+// Rewrite a caption/script to sound human (strip AI tells) via /humanize.
+// Uses the active brand voice + the ViralScore platform selector if present.
+async function humanizeText(text) {
+    const platEl = document.getElementById('scorePlatform');
+    const platform = (platEl && platEl.value) || 'instagram';
+    const voiceContext = (window.FlipItVoice && window.FlipItVoice.getActiveContext) ? window.FlipItVoice.getActiveContext() : '';
+    let resp;
+    try {
+        resp = await fetch('/.netlify/functions/humanize', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: text, platform: platform, voiceContext: voiceContext }),
+            signal: AbortSignal.timeout(30000)
+        });
+    } catch (e) {
+        throw new Error('Could not reach the humanizer — retry.');
+    }
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.text) throw new Error(data.error || 'Humanize failed.');
+    return data.text;
 }
 
 async function postHeavyJob(railwayPath, netlifyProxyPath, payloadObj, timeoutMs) {
