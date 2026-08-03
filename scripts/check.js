@@ -70,6 +70,39 @@ for (const f of files.filter((f) => f.endsWith('.js'))) {
 }
 if (!syntaxBad) pass('All JavaScript files parse');
 
+// ── 1b. every name imported from a local helper actually exists ──────────
+// Parsing is not enough: `const { nope } = require('./_config')` is valid
+// syntax and fails only at runtime, as `nope is not a function`. That
+// shipped once and broke two live endpoints, so it is checked statically.
+let badImports = 0;
+for (const f of fs.readdirSync(FN_DIR).filter((f) => f.endsWith('.js'))) {
+    const src = fs.readFileSync(path.join(FN_DIR, f), 'utf8');
+    const re = /const\s*\{([^}]+)\}\s*=\s*require\('(\.\/_[A-Za-z0-9_]+)'\)/g;
+    let m;
+    while ((m = re.exec(src)) !== null) {
+        const [, namesRaw, modPath] = m;
+        let mod;
+        try {
+            mod = require(path.join(FN_DIR, modPath.replace('./', '') + '.js'));
+        } catch (e) {
+            err(`netlify/functions/${f} imports ${modPath}, which failed to load: ${e.message}`);
+            badImports++;
+            continue;
+        }
+        for (const entry of namesRaw.split(',')) {
+            // Handles both `foo` and `foo: renamed`.
+            const name = entry.split(':')[0].trim();
+            if (!name) continue;
+            if (!(name in mod)) {
+                badImports++;
+                err(`netlify/functions/${f} imports "${name}" from ${modPath}, ` +
+                    `but ${modPath} does not export it — this crashes at runtime.`);
+            }
+        }
+    }
+}
+if (!badImports) pass('Every helper import resolves to a real export');
+
 // ── 2. load the front-end config ─────────────────────────────────────────
 // Loaded before the stale scan because "is this value stale?" depends on
 // what the current owner has actually configured.
